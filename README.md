@@ -1,1 +1,0 @@
-# An-Exact-Approach-for-the-2D-Bandwidth-Minimization-Problem-using-SAT-based-Sequence-Counting

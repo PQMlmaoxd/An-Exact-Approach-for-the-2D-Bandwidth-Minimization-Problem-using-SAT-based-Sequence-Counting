@@ -51,9 +51,9 @@ def encode_abs_distance_final(U_vars, V_vars, n, vpool):
                     # Tương đương: ¬U_k ∨ ¬V_{k-d} ∨ ¬T_{d+1}
                     clauses.append([-U_vars[k - 1], -V_vars[v_pos - 1], -T_vars[d]])
     
-    # Luật Đơn điệu: T_d → T_{d-1}
-    for d in range(2, len(T_vars) + 1):
-        clauses.append([-T_vars[d - 1], T_vars[d - 2]])
+    # Luật Đơn điệu: ¬T_d → ¬T_{d+1} (bit propagation từ trái sang phải)
+    for d in range(1, len(T_vars)):
+        clauses.append([T_vars[d - 1], -T_vars[d]])
     
     return T_vars, clauses
 
