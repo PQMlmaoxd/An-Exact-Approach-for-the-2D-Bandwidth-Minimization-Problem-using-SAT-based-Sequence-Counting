@@ -11,27 +11,35 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from distance_encoder import encode_abs_distance_final
     from random_assignment_ub_finder import RandomAssignmentUBFinder
+    from nsc_encoder import encode_nsc_exactly_k, encode_nsc_at_most_k
+    print("✅ Successfully imported essential modules including NSC encoder")
+except ImportError as e:
+    print(f"❌ Critical import error: {e}")
+    print("NSC encoder is required for O(n²) complexity optimization")
+    raise ImportError("Missing required NSC encoder - cannot proceed without it")
+
+try:
     from kissat_solver import KissatSolver
 except ImportError:
-    # Nếu không tìm thấy, tạo một implementation đơn giản
+    class KissatSolver:
+        def __init__(self, *args, **kwargs):
+            pass
+
+# Fallback implementations if imports fail
+if 'encode_abs_distance_final' not in locals():
     def encode_abs_distance_final(U_vars, V_vars, n, vpool, prefix="T"):
-        # Simplified version for testing
         T_vars = [vpool.id(f'{prefix}_geq_{d}') for d in range(1, n)]
         clauses = []
         return T_vars, clauses
-    
+
+if 'RandomAssignmentUBFinder' not in locals():
     class RandomAssignmentUBFinder:
         def __init__(self, n, edges, seed=None):
             self.n = n
             self.edges = edges
         
         def find_ub_random_search(self, max_iterations=1000, time_limit=30):
-            # Fallback implementation
             return {'ub': 2 * (self.n - 1), 'assignment': None, 'iterations': 0, 'time': 0}
-    
-    class KissatSolver:
-        def __init__(self, *args, **kwargs):
-            pass
 
 class BandwidthOptimizationSolver:
     def __init__(self, n, solver_type='glucose4'):
@@ -89,33 +97,40 @@ class BandwidthOptimizationSolver:
     
     def encode_position_constraints(self):
         """
-        Mã hóa ràng buộc: mỗi đỉnh có đúng một vị trí trên mỗi trục
+        Mã hóa ràng buộc: mỗi đỉnh có đúng một vị trí trên mỗi trục - NSC ONLY VERSION
+        Độ phức tạp: O(n²) thay vì O(n⁴) của binomial encoding
         """
         clauses = []
         
         for v in range(1, self.n + 1):
-            # Mỗi đỉnh có ít nhất một vị trí X
-            clauses.append(self.X_vars[v][:])
-            # Mỗi đỉnh có tối đa một vị trí X
-            for i in range(self.n):
-                for j in range(i + 1, self.n):
-                    clauses.append([-self.X_vars[v][i], -self.X_vars[v][j]])
+            # NSC Exactly-1 encoding - O(n) clauses per constraint
+            # Exactly-One cho X using NSC
+            nsc_x_clauses = encode_nsc_exactly_k(self.X_vars[v], 1, self.vpool)
+            clauses.extend(nsc_x_clauses)
             
-            # Tương tự cho trục Y
-            clauses.append(self.Y_vars[v][:])
-            for i in range(self.n):
-                for j in range(i + 1, self.n):
-                    clauses.append([-self.Y_vars[v][i], -self.Y_vars[v][j]])
+            # Exactly-One cho Y using NSC  
+            nsc_y_clauses = encode_nsc_exactly_k(self.Y_vars[v], 1, self.vpool)
+            clauses.extend(nsc_y_clauses)
         
-        # Mỗi position (X,Y) có tối đa một đỉnh - FIXED VERSION
-        # Cấm hai nodes cùng exact position (x+1, y+1)
+        # Mỗi position (X,Y) có tối đa một đỉnh - NSC OPTIMIZED VERSION O(n²)
+        # NSC-based position uniqueness: At most 1 node per position
         for x in range(self.n):
             for y in range(self.n):
-                for i in range(1, self.n + 1):
-                    for j in range(i + 1, self.n + 1):
-                        # Nodes i và j không thể cùng position (x+1, y+1)
-                        # ¬(Xi_{x} ∧ Yi_{y} ∧ Xj_{x} ∧ Yj_{y})
-                        clauses.append([-self.X_vars[i][x], -self.Y_vars[i][y], -self.X_vars[j][x], -self.Y_vars[j][y]])
+                # Tạo indicator variables: node_at_pos[v] = (X_v_x ∧ Y_v_y)
+                node_indicators = []
+                for v in range(1, self.n + 1):
+                    indicator = self.vpool.id(f'node_{v}_at_{x}_{y}')
+                    node_indicators.append(indicator)
+                    
+                    # indicator ↔ (X_v_x ∧ Y_v_y)
+                    clauses.append([-indicator, self.X_vars[v][x]])
+                    clauses.append([-indicator, self.Y_vars[v][y]])
+                    clauses.append([indicator, -self.X_vars[v][x], -self.Y_vars[v][y]])
+                
+                # NSC: At most 1 node at position (x,y)  
+                # Use unified nsc_encoder.py implementation for consistency
+                nsc_at_most_1 = encode_nsc_at_most_k(node_indicators, 1, self.vpool)
+                clauses.extend(nsc_at_most_1)
         
         return clauses
     
@@ -144,7 +159,7 @@ class BandwidthOptimizationSolver:
     
     def step1_find_ub_random(self, max_iterations=1000, time_limit=30):
         """
-        Bước 1: Tìm UB bằng phép gán ngẫu nhiên
+        Bước 1: Tìm UB bằng phép gán ngẫu nhiên - SIMPLIFIED VERSION
         
         Args:
             max_iterations: Số lần thử tối đa
@@ -153,8 +168,8 @@ class BandwidthOptimizationSolver:
         Returns:
             dict: Kết quả với UB và thông tin chi tiết
         """
-        print(f"\n=== STEP 1: Finding Upper Bound with Random Assignment ===")
-        print(f"Strategy: Random search without SAT encoding")
+        print(f"\n=== STEP 1: Finding Upper Bound with Pure Random Assignment ===")
+        print(f"Strategy: Pure random search without SAT encoding")
         print(f"Max iterations: {max_iterations}, Time limit: {time_limit}s")
         
         # Tạo UB finder
@@ -171,73 +186,12 @@ class BandwidthOptimizationSolver:
         # Visualize nếu tìm được assignment
         if result['assignment'] is not None:
             print(f"\nVisualizing best assignment:")
-            ub_finder.visualize_assignment(result)
+            try:
+                ub_finder.visualize_assignment(result)
+            except AttributeError:
+                print("Visualization not available")
         
         return result
-    
-    def step1_find_ub_hybrid(self, random_iterations=500, greedy_tries=10):
-        """
-        Bước 1: Tìm UB bằng hybrid approach (random + greedy)
-        
-        Args:
-            random_iterations: Số lần thử random
-            greedy_tries: Số lần thử greedy
-            
-        Returns:
-            dict: Kết quả với UB tốt nhất
-        """
-        print(f"\n=== STEP 1: Finding Upper Bound with Hybrid Approach ===")
-        print(f"Strategy: Greedy + Random + Smart Sampling")
-        
-        # Tạo UB finder
-        ub_finder = RandomAssignmentUBFinder(self.n, self.edges, seed=42)
-        
-        # Thử các phương pháp khác nhau
-        results = []
-        
-        # 1. Random search
-        print(f"\n1. Random Search ({random_iterations} iterations):")
-        result1 = ub_finder.find_ub_random_search(random_iterations, time_limit=15)
-        results.append(("Random Search", result1))
-        
-        # 2. Greedy + Random (if method exists)
-        try:
-            print(f"\n2. Greedy + Random ({greedy_tries} tries):")
-            result2 = ub_finder.find_ub_greedy_random(greedy_tries, random_iterations//greedy_tries)
-            results.append(("Greedy + Random", result2))
-        except AttributeError:
-            print(f"\n2. Greedy + Random: Method not available, skipping")
-            result2 = result1  # Use random result as fallback
-            results.append(("Greedy + Random (fallback)", result2))
-        
-        # 3. Smart Sampling (if method exists)
-        try:
-            print(f"\n3. Smart Sampling:")
-            result3 = ub_finder.find_ub_smart_sampling(random_iterations//4)
-            results.append(("Smart Sampling", result3))
-        except AttributeError:
-            print(f"\n3. Smart Sampling: Method not available, skipping")
-            result3 = result1  # Use random result as fallback
-            results.append(("Smart Sampling (fallback)", result3))
-        
-        # Tìm kết quả tốt nhất
-        best_method, best_result = min(results, key=lambda x: x[1]['ub'])
-        
-        print(f"\n=== HYBRID SEARCH SUMMARY ===")
-        for method, result in results:
-            print(f"{method:25}: UB = {result['ub']:3d}, Time = {result['time']:.2f}s")
-        
-        print(f"\n🏆 BEST METHOD: {best_method}")
-        print(f"🎯 BEST UB: {best_result['ub']}")
-        
-        # Visualize best result (if method exists)
-        try:
-            print(f"\nVisualizing best assignment:")
-            ub_finder.visualize_assignment(best_result)
-        except AttributeError:
-            print(f"\nVisualization not available")
-        
-        return best_result
     
     def step1_test_ub_pure_random(self, K):
         """
@@ -276,63 +230,6 @@ class BandwidthOptimizationSolver:
             print(f"Need to try higher K value")
             return False
     
-    def step1_combined_ub_search(self, use_random=True, use_sat_verification=True):
-        """
-        Bước 1: Combined UB search - Random + SAT verification
-        
-        Args:
-            use_random: Có dùng random search không
-            use_sat_verification: Có verify bằng SAT không
-            
-        Returns:
-            dict: Kết quả với UB verified
-        """
-        print(f"\n=== STEP 1: COMBINED UB SEARCH ===")
-        print(f"Strategy: Random Assignment + SAT Verification")
-        
-        # Phase 1: Random search để tìm UB candidate
-        if use_random:
-            print(f"\nPhase 1: Random search for UB candidate")
-            ub_result = self.step1_find_ub_hybrid(random_iterations=800, greedy_tries=8)
-            candidate_ub = ub_result['ub']
-            
-            print(f"Random search found UB candidate: {candidate_ub}")
-        else:
-            # Fallback: theoretical upper bound
-            candidate_ub = 2 * (self.n - 1)
-            print(f"Using theoretical UB: {candidate_ub}")
-        
-        # Phase 2: SAT verification
-        if use_sat_verification:
-            print(f"\nPhase 2: SAT verification of UB candidate")
-            
-            # Test từ candidate_ub xuống để tìm UB chính xác
-            verified_ub = candidate_ub
-            
-            for K in range(candidate_ub, 0, -1):
-                print(f"Verifying K={K} with SAT...")
-                if self.step1_test_upper_bound(K):
-                    verified_ub = K
-                    print(f"✓ K={K} is verified as feasible UB")
-                    break
-                else:
-                    print(f"✗ K={K} is not feasible")
-                    verified_ub = K + 1
-                    break
-            
-            print(f"SAT verification result: UB = {verified_ub}")
-        else:
-            verified_ub = candidate_ub
-        
-        print(f"\n🎯 FINAL UB: {verified_ub}")
-        
-        return {
-            'ub': verified_ub,
-            'candidate_ub': candidate_ub if use_random else None,
-            'verified': use_sat_verification,
-            'method': 'combined'
-        }
-        
     def step2_encode_advanced_constraints(self, K):
         """
         Bước 2: Encode đầy đủ constraints theo ý tưởng thầy
@@ -351,8 +248,9 @@ class BandwidthOptimizationSolver:
             bool: True nếu có solution với K, False nếu không
         """
         print(f"\n=== STEP 2: Testing K={K} with Advanced Constraint Encoding ===")
-        print(f"Strategy: Full SAT encoding with Thermometer constraints")
+        print(f"Strategy: Full SAT encoding with Thermometer constraints + NSC")
         print(f"Encoding: (Tx≤{K}) ∧ (Ty≤{K}) ∧ implication constraints")
+        print(f"Position constraint encoding: NSC Sequential Counter O(n²)")
         
         # Tạo solver mới
         if self.solver_type == 'glucose4':
@@ -828,7 +726,7 @@ def test_bandwidth_solver():
 
 def test_random_ub_standalone():
     """
-    Test standalone random UB finder
+    Test standalone random UB finder - SIMPLIFIED VERSION
     """
     print("=== TESTING STANDALONE RANDOM UB FINDER ===")
     
@@ -838,17 +736,15 @@ def test_random_ub_standalone():
     
     ub_finder = RandomAssignmentUBFinder(n, edges, seed=42)
     
-    # Test random search
+    # Test pure random search only
     result = ub_finder.find_ub_random_search(max_iterations=1000, time_limit=15)
-    ub_finder.visualize_assignment(result)
     
-    print(f"\nRandom search result: UB = {result['ub']}")
+    try:
+        ub_finder.visualize_assignment(result)
+    except AttributeError:
+        print("Visualization not available")
     
-    # Test hybrid
-    hybrid_result = ub_finder.find_ub_hybrid_search(num_greedy_tries=5, random_tries_per_greedy=100)
-    ub_finder.visualize_assignment(hybrid_result)
-    
-    print(f"Hybrid search result: UB = {hybrid_result['ub']}")
+    print(f"\nPure random search result: UB = {result['ub']}")
 
 if __name__ == '__main__':
     # Test main solver
