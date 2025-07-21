@@ -98,7 +98,7 @@ class BandwidthOptimizationSolver:
     def encode_position_constraints(self):
         """
         Mã hóa ràng buộc: mỗi đỉnh có đúng một vị trí trên mỗi trục - NSC ONLY VERSION
-        Độ phức tạp: O(n²) thay vì O(n⁴) của binomial encoding
+        Độ phức tạp: O(n²)
         """
         clauses = []
         
@@ -156,42 +156,6 @@ class BandwidthOptimizationSolver:
             clauses.extend(Ty_clauses)
         
         return clauses
-    
-    def step1_find_ub_random(self, max_iterations=1000, time_limit=30):
-        """
-        Bước 1: Tìm UB bằng phép gán ngẫu nhiên - SIMPLIFIED VERSION
-        
-        Args:
-            max_iterations: Số lần thử tối đa
-            time_limit: Thời gian giới hạn (seconds)
-            
-        Returns:
-            dict: Kết quả với UB và thông tin chi tiết
-        """
-        print(f"\n=== STEP 1: Finding Upper Bound with Pure Random Assignment ===")
-        print(f"Strategy: Pure random search without SAT encoding")
-        print(f"Max iterations: {max_iterations}, Time limit: {time_limit}s")
-        
-        # Tạo UB finder
-        ub_finder = RandomAssignmentUBFinder(self.n, self.edges, seed=42)
-        
-        # Tìm UB bằng random search
-        result = ub_finder.find_ub_random_search(max_iterations, time_limit)
-        
-        print(f"\nRandom UB Search Results:")
-        print(f"Upper Bound found: {result['ub']}")
-        print(f"Iterations used: {result['iterations']}")
-        print(f"Time taken: {result['time']:.2f}s")
-        
-        # Visualize nếu tìm được assignment
-        if result['assignment'] is not None:
-            print(f"\nVisualizing best assignment:")
-            try:
-                ub_finder.visualize_assignment(result)
-            except AttributeError:
-                print("Visualization not available")
-        
-        return result
     
     def step1_test_ub_pure_random(self, K):
         """
@@ -469,197 +433,6 @@ class BandwidthOptimizationSolver:
         # Nếu đến K=1 vẫn SAT thì optimal = 1
         print(f"🎯 OPTIMAL BANDWIDTH = {optimal_k} (tested down to K=1)")
         return optimal_k
-    
-    def _incremental_search(self, UB, base_solver):
-        """
-        Tìm kiếm incremental - sử dụng solver cũ và thêm constraints
-        """
-        print("Using INCREMENTAL search method")
-        optimal_K = UB - 1
-        
-        try:
-            for K in range(UB - 2, 0, -1):
-                print(f"Testing K={K} incrementally...")
-                
-                # Thêm constraint mới cho K
-                new_constraints = self.encode_k_constraint_incremental(K)
-                
-                # Add new constraints to existing solver
-                for clause in new_constraints:
-                    base_solver.add_clause(clause)
-                
-                result = base_solver.solve()
-                
-                if result:
-                    model = base_solver.get_model()
-                    optimal_K = K
-                    print(f"✓ K={K} is feasible")
-                else:
-                    print(f"✗ K={K} is not feasible")
-                    break
-                    
-        finally:
-            base_solver.delete()
-            
-        print(f"Incremental search found optimal K = {optimal_K}")
-        return optimal_K
-    
-    def _new_solver_search(self, UB):
-        """
-        Tìm kiếm với solver mới cho mỗi K
-        """
-        print("Using NEW SOLVER method")
-        optimal_K = UB - 1
-        
-        for K in range(UB - 2, 0, -1):
-            print(f"Testing K={K} with new solver...")
-            
-            # Tạo solver hoàn toàn mới
-            if self.solver_type == 'glucose4':
-                solver = Glucose4()
-            elif self.solver_type == 'glucose41':
-                solver = Glucose4()
-            else:
-                solver = Glucose3()
-            
-            try:
-                # Encode lại tất cả constraints
-                all_clauses = []
-                all_clauses.extend(self.encode_position_constraints())
-                all_clauses.extend(self.encode_distance_constraints())
-                all_clauses.extend(self.encode_advanced_bandwidth_constraint(K))
-                
-                # Add to solver
-                for clause in all_clauses:
-                    solver.add_clause(clause)
-                
-                result = solver.solve()
-                
-                if result:
-                    model = solver.get_model()
-                    optimal_K = K
-                    print(f"✓ K={K} is feasible")
-                else:
-                    print(f"✗ K={K} is not feasible")
-                    break
-                    
-            finally:
-                solver.delete()
-        
-        print(f"New solver search found optimal K = {optimal_K}")
-        return optimal_K
-    
-    def encode_bandwidth_constraint(self, K):
-        """
-        Encode constraint đúng: max(all Manhattan distances) <= K
-        
-        Bandwidth = max_{(u,v) ∈ E} {|X[u] - X[v]| + |Y[u] - Y[v]|}
-        
-        Constraint: max{Tx₁ + Ty₁, Tx₂ + Ty₂, ..., Txₘ + Tyₘ} <= K
-        Equivalent: (Tx₁ + Ty₁ <= K) ∧ (Tx₂ + Ty₂ <= K) ∧ ... ∧ (Txₘ + Tyₘ <= K)
-        
-        Với thermometer encoding:
-        - Tx[i] means Tx >= i+1 
-        - Ty[j] means Ty >= j+1
-        - Tx + Ty <= K means: không thể có Tx >= i và Ty >= j where i + j > K
-        
-        FIXED: Bao gồm cả trường hợp Ty = 0 (j = 0)
-        """
-        clauses = []
-        
-        # Constraint: For ALL edges, Tx + Ty <= K (this ensures max <= K)
-        for edge_id in self.Tx_vars:
-            Tx = self.Tx_vars[edge_id]
-            Ty = self.Ty_vars[edge_id]
-            
-            # For each combination (i,j) where i + j > K, add constraint
-            # Include j=0 case (Ty = 0)
-            for i in range(1, len(Tx) + 1):  # Tx >= i (represented by Tx[i-1])
-                for j in range(0, len(Ty) + 1):  # Ty >= j (j=0 means any Ty value)
-                    if i + j > K:
-                        if j == 0:
-                            # Case: Tx >= i ∧ Ty >= 0 (any Ty) where i > K
-                            # Simply forbid Tx >= i when i > K
-                            if i-1 < len(Tx):
-                                clauses.append([-Tx[i-1]])
-                        else:
-                            # Case: Tx >= i ∧ Ty >= j where i + j > K
-                            if i-1 < len(Tx) and j-1 < len(Ty):
-                                clauses.append([-Tx[i-1], -Ty[j-1]])
-        
-        return clauses
-    
-    def encode_advanced_bandwidth_constraint(self, K):
-        """
-        Encode constraint đúng cho bandwidth:
-        max{Tx₁ + Ty₁, Tx₂ + Ty₂, ..., Txₘ + Tyₘ} <= K
-        
-        Equivalent: (Tx₁ + Ty₁ <= K) ∧ (Tx₂ + Ty₂ <= K) ∧ ... ∧ (Txₘ + Tyₘ <= K)
-        
-        For each edge (u,v): Tx + Ty <= K
-        Advanced encoding thêm các constraint tighter để improve performance.
-        
-        FIXED: Bao gồm constraint cho trường hợp Ty = 0
-        
-        Thermometer encoding semantics:
-        - Tx[i] means Tx >= i+1 (0-indexed)
-        - So Tx >= d is represented by Tx[d-1] 
-        - And Ty <= d is represented by ¬Ty[d] (since Ty[d] means Ty >= d+1)
-        """
-        clauses = []
-        
-        # Main constraint: For ALL edges, Tx + Ty <= K
-        for edge_id in self.Tx_vars:
-            Tx = self.Tx_vars[edge_id] 
-            Ty = self.Ty_vars[edge_id]
-            
-            # Basic constraint: Tx + Ty <= K (FIXED VERSION)
-            # For each combination (i,j) where i + j > K, add constraint
-            for i in range(1, len(Tx) + 1):  # Tx >= i
-                for j in range(0, len(Ty) + 1):  # Ty >= j (include j=0 case)
-                    if i + j > K:
-                        if j == 0:
-                            # Case: Tx >= i where i > K (forbid completely)
-                            if i-1 < len(Tx):
-                                clauses.append([-Tx[i-1]])
-                        else:
-                            # Case: Tx >= i ∧ Ty >= j where i + j > K
-                            if i-1 < len(Tx) and j-1 < len(Ty):
-                                clauses.append([-Tx[i-1], -Ty[j-1]])
-            
-            # Advanced tighter constraints for better propagation:
-            # (Tx >= i → Ty <= K-i) cho i = 1, 2, ..., K
-            for i in range(1, K + 1):
-                if K-i >= 0:
-                    # Tx >= i is represented by Tx[i-1] (if i-1 < len(Tx))
-                    # Ty <= K-i is represented by ¬Ty[K-i] (if K-i < len(Ty))
-                    
-                    if i-1 < len(Tx):
-                        if K-i == 0:
-                            # Special case: Tx >= i → Ty = 0 (forbid all Ty variables)
-                            if len(Ty) > 0:
-                                clauses.append([-Tx[i-1], -Ty[0]])
-                        elif K-i < len(Ty):
-                            # General case: Tx >= i → Ty <= K-i
-                            clauses.append([-Tx[i-1], -Ty[K-i]])
-        
-        return clauses
-    
-    def encode_k_constraint_incremental(self, K):
-        """
-        Encode constraint cho K mới trong incremental search
-        Chỉ cần thêm constraint tighter hơn K cũ
-        """
-        clauses = []
-        
-        for edge_id in self.Tx_vars:
-            # Thêm constraint nghiêm ngặt hơn cho K mới
-            if K >= 0 and K < len(self.Tx_vars[edge_id]):
-                clauses.append([-self.Tx_vars[edge_id][K]])
-            if K >= 0 and K < len(self.Ty_vars[edge_id]):
-                clauses.append([-self.Ty_vars[edge_id][K]])
-        
-        return clauses
 
 def test_bandwidth_solver():
     """
@@ -724,32 +497,6 @@ def test_bandwidth_solver():
     print(f"Cycle    (5 nodes, 5 edges): Optimal = {optimal3}")
     print(f"="*80)
 
-def test_random_ub_standalone():
-    """
-    Test standalone random UB finder - SIMPLIFIED VERSION
-    """
-    print("=== TESTING STANDALONE RANDOM UB FINDER ===")
-    
-    # Test với đồ thị lớn hơn
-    n = 6
-    edges = [(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 1), (1, 4), (2, 5)]
-    
-    ub_finder = RandomAssignmentUBFinder(n, edges, seed=42)
-    
-    # Test pure random search only
-    result = ub_finder.find_ub_random_search(max_iterations=1000, time_limit=15)
-    
-    try:
-        ub_finder.visualize_assignment(result)
-    except AttributeError:
-        print("Visualization not available")
-    
-    print(f"\nPure random search result: UB = {result['ub']}")
-
 if __name__ == '__main__':
     # Test main solver
     test_bandwidth_solver()
-    
-    # Test standalone UB finder
-    print("\n" + "="*80)
-    # test_random_ub_standalone()  # Uncomment to test standalone
