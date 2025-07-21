@@ -3,10 +3,10 @@
 from pysat.formula import IDPool
 from pysat.solvers import Solver
 
-def encode_abs_distance_final(U_vars, V_vars, n, vpool):
+def encode_abs_distance_final(U_vars, V_vars, n, vpool, prefix="T"):
     """Mã hóa khoảng cách O(n²) theo luật đối xứng"""
     
-    T_vars = [vpool.id(f'T_geq_{d}') for d in range(1, n)]
+    T_vars = [vpool.id(f'{prefix}_geq_{d}') for d in range(1, n)]
     clauses = []
     
     # Luật Bật T (đối xứng, O(n²))
@@ -50,6 +50,13 @@ def encode_abs_distance_final(U_vars, V_vars, n, vpool):
                     # (U_k ∧ V_{k-d}) → ¬T_{d+1}
                     # Tương đương: ¬U_k ∨ ¬V_{k-d} ∨ ¬T_{d+1}
                     clauses.append([-U_vars[k - 1], -V_vars[v_pos - 1], -T_vars[d]])
+    
+    # CRITICAL FIX: Add constraints for distance = 0 case
+    # If U and V are at same position, distance < 1, so T_geq_1 = False
+    for k in range(1, n + 1):
+        if len(T_vars) > 0:  # Ensure T_geq_1 exists
+            # (U_k ∧ V_k) → ¬T_1 (same position → distance < 1)
+            clauses.append([-U_vars[k - 1], -V_vars[k - 1], -T_vars[0]])
     
     # Luật Đơn điệu: ¬T_d → ¬T_{d+1} (bit propagation từ trái sang phải)
     for d in range(1, len(T_vars)):
