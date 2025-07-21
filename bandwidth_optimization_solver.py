@@ -11,11 +11,12 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from distance_encoder import encode_abs_distance_final
     from random_assignment_ub_finder import RandomAssignmentUBFinder
+    from kissat_solver import KissatSolver
 except ImportError:
     # Nếu không tìm thấy, tạo một implementation đơn giản
-    def encode_abs_distance_final(U_vars, V_vars, n, vpool):
+    def encode_abs_distance_final(U_vars, V_vars, n, vpool, prefix="T"):
         # Simplified version for testing
-        T_vars = [vpool.id(f'T_geq_{d}') for d in range(1, n)]
+        T_vars = [vpool.id(f'{prefix}_geq_{d}') for d in range(1, n)]
         clauses = []
         return T_vars, clauses
     
@@ -27,6 +28,10 @@ except ImportError:
         def find_ub_random_search(self, max_iterations=1000, time_limit=30):
             # Fallback implementation
             return {'ub': 2 * (self.n - 1), 'assignment': None, 'iterations': 0, 'time': 0}
+    
+    class KissatSolver:
+        def __init__(self, *args, **kwargs):
+            pass
 
 class BandwidthOptimizationSolver:
     def __init__(self, n, solver_type='glucose4'):
@@ -35,7 +40,7 @@ class BandwidthOptimizationSolver:
         
         Args:
             n: Kích thước bài toán (số đỉnh)
-            solver_type: Loại SAT solver ('glucose4', 'glucose41', 'glucose3')
+            solver_type: Loại SAT solver ('glucose4', 'glucose41', 'glucose3', 'kissat')
         """
         self.n = n
         self.solver_type = solver_type
@@ -195,29 +200,42 @@ class BandwidthOptimizationSolver:
         result1 = ub_finder.find_ub_random_search(random_iterations, time_limit=15)
         results.append(("Random Search", result1))
         
-        # 2. Greedy + Random
-        print(f"\n2. Greedy + Random ({greedy_tries} tries):")
-        result2 = ub_finder.find_ub_greedy_random(greedy_tries, random_iterations//greedy_tries)
-        results.append(("Greedy + Random", result2))
+        # 2. Greedy + Random (if method exists)
+        try:
+            print(f"\n2. Greedy + Random ({greedy_tries} tries):")
+            result2 = ub_finder.find_ub_greedy_random(greedy_tries, random_iterations//greedy_tries)
+            results.append(("Greedy + Random", result2))
+        except AttributeError:
+            print(f"\n2. Greedy + Random: Method not available, skipping")
+            result2 = result1  # Use random result as fallback
+            results.append(("Greedy + Random (fallback)", result2))
         
-        # 3. Smart Sampling
-        print(f"\n3. Smart Sampling:")
-        result3 = ub_finder.find_ub_smart_sampling(random_iterations//4)
-        results.append(("Smart Sampling", result3))
+        # 3. Smart Sampling (if method exists)
+        try:
+            print(f"\n3. Smart Sampling:")
+            result3 = ub_finder.find_ub_smart_sampling(random_iterations//4)
+            results.append(("Smart Sampling", result3))
+        except AttributeError:
+            print(f"\n3. Smart Sampling: Method not available, skipping")
+            result3 = result1  # Use random result as fallback
+            results.append(("Smart Sampling (fallback)", result3))
         
         # Tìm kết quả tốt nhất
         best_method, best_result = min(results, key=lambda x: x[1]['ub'])
         
         print(f"\n=== HYBRID SEARCH SUMMARY ===")
         for method, result in results:
-            print(f"{method:15}: UB = {result['ub']:3d}, Time = {result['time']:.2f}s")
+            print(f"{method:25}: UB = {result['ub']:3d}, Time = {result['time']:.2f}s")
         
         print(f"\n🏆 BEST METHOD: {best_method}")
         print(f"🎯 BEST UB: {best_result['ub']}")
         
-        # Visualize best result
-        print(f"\nVisualizing best assignment:")
-        ub_finder.visualize_assignment(best_result)
+        # Visualize best result (if method exists)
+        try:
+            print(f"\nVisualizing best assignment:")
+            ub_finder.visualize_assignment(best_result)
+        except AttributeError:
+            print(f"\nVisualization not available")
         
         return best_result
     
@@ -341,6 +359,8 @@ class BandwidthOptimizationSolver:
             solver = Glucose4()
         elif self.solver_type == 'glucose41':
             solver = Glucose4()
+        elif self.solver_type == 'kissat':
+            solver = KissatSolver()
         else:
             solver = Glucose3()
         
@@ -531,23 +551,26 @@ class BandwidthOptimizationSolver:
             print(f"Consider increasing end_k or checking graph connectivity")
             return None
         
-        # Phase 2: SAT encoding với K = UB - 1
-        print(f"\n🔧 PHASE 2: SAT encoding with K = {feasible_ub - 1}")
+        # Phase 2: SAT encoding - thử từ K = UB-1 xuống đến 1
+        print(f"\n🔧 PHASE 2: SAT encoding optimization from K={feasible_ub-1} down to 1")
         
-        target_k = feasible_ub - 1
+        optimal_k = feasible_ub  # Mặc định là UB
         
-        if target_k < 1:
-            print(f"✅ OPTIMAL: UB = {feasible_ub} is already minimal (K=1 not possible)")
-            return feasible_ub
+        # Thử từ UB-1 xuống đến 1 cho đến khi UNSAT
+        for K in range(feasible_ub - 1, 0, -1):
+            print(f"\n--- SAT Testing K = {K} ---")
+            
+            if self.step2_encode_advanced_constraints(K):
+                optimal_k = K
+                print(f"✅ K = {K} is feasible with SAT - continuing to test smaller K")
+            else:
+                print(f"❌ K = {K} is UNSAT - stopping search")
+                print(f"🎯 OPTIMAL BANDWIDTH = {optimal_k}")
+                return optimal_k
         
-        if self.step2_encode_advanced_constraints(target_k):
-            print(f"✅ SUCCESS: K = {target_k} is feasible with SAT")
-            print(f"🎯 OPTIMAL BANDWIDTH = {target_k}")
-            return target_k
-        else:
-            print(f"❌ K = {target_k} is infeasible with SAT")
-            print(f"🎯 OPTIMAL BANDWIDTH = {feasible_ub}")
-            return feasible_ub
+        # Nếu đến K=1 vẫn SAT thì optimal = 1
+        print(f"🎯 OPTIMAL BANDWIDTH = {optimal_k} (tested down to K=1)")
+        return optimal_k
     
     def _incremental_search(self, UB, base_solver):
         """

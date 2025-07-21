@@ -70,7 +70,7 @@ def comprehensive_test():
             optimal_found = None
             
             for K in range(1, test_case['n'] + 1):
-                result = solver.step1_test_upper_bound(K)
+                result = solver.step2_encode_advanced_constraints(K)
                 if result:
                     optimal_found = K
                     print(f"   ✅ K={K} is feasible")
