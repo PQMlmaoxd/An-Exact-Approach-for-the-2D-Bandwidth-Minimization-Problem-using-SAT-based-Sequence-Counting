@@ -2,8 +2,8 @@
 
 def _base_sequential_counter(variables, k, vpool):
     """
-    Xây dựng bộ đếm tuần tự theo đúng NSC gốc (code.txt).
-    R[i, j] nghĩa là: "trong số i biến đầu tiên {x_1, ..., x_i}, có ít nhất j biến là True"
+    Build sequential counter according to original NSC (code.txt).
+    R[i, j] means: "among the first i variables {x_1, ..., x_i}, at least j variables are True"
     """
     if not variables:
         return [], {}
@@ -11,55 +11,55 @@ def _base_sequential_counter(variables, k, vpool):
         return [[1], [-1]], {}
 
     n = len(variables)
-    R = {}  # Dictionary để lưu các biến phụ R_i,j
+    R = {}  # Dictionary to store auxiliary variables R_i,j
     clauses = []
     group_id = hash(str(variables))
 
-    # Khởi tạo các biến phụ R_i,j cho i từ 1 đến n-1, j từ 1 đến k
-    for i in range(1, n):  # Chỉ đến n-1, không có R_n,j
+    # Initialize auxiliary variables R_i,j for i from 1 to n-1, j from 1 to k
+    for i in range(1, n):  # Only up to n-1, no R_n,j
         for j in range(1, min(i, k) + 1):
             R[i, j] = vpool.id(f'R_group{group_id}_{i}_{j}')
 
     # =================================================================
-    # CÔNG THỨC (1): Dồn bit 1
-    # Với mỗi i từ 1 đến n-1: (X_i) --> (R_i,1)
+    # FORMULA (1): Push bit 1
+    # For each i from 1 to n-1: (X_i) --> (R_i,1)
     # =================================================================
     for i in range(1, n):
         xi = variables[i - 1]
         clauses.append([-xi, R[i, 1]])
 
     # =================================================================
-    # CÔNG THỨC (2): Bit đếm trước kéo theo bit đếm sau
-    # Với mỗi i từ 2 đến n-1, j từ 1 đến min(i-1, k): (R_{i-1,j}) --> (R_i,j)
+    # FORMULA (2): Previous count bit implies next count bit
+    # For each i from 2 to n-1, j from 1 to min(i-1, k): (R_{i-1,j}) --> (R_i,j)
     # =================================================================
     for i in range(2, n):
         for j in range(1, min(i, k) + 1):
-            if j <= i - 1:  # Đảm bảo R[i-1, j] tồn tại
+            if j <= i - 1:  # Ensure R[i-1, j] exists
                 clauses.append([-R[i - 1, j], R[i, j]])
 
     # =================================================================
-    # CÔNG THỨC (3): Thêm một biến TRUE sẽ tăng bộ đếm
-    # Với mỗi i từ 2 đến n-1, j từ 2 đến min(i, k): (X_i AND R_{i-1,j-1}) --> (R_i,j)
+    # FORMULA (3): Adding one TRUE variable increases counter
+    # For each i from 2 to n-1, j from 2 to min(i, k): (X_i AND R_{i-1,j-1}) --> (R_i,j)
     # =================================================================
     for i in range(2, n):
         xi = variables[i - 1]
         for j in range(2, min(i, k) + 1):
-            if j - 1 <= i - 1:  # Đảm bảo R[i-1, j-1] tồn tại
+            if j - 1 <= i - 1:  # Ensure R[i-1, j-1] exists
                 clauses.append([-xi, -R[i - 1, j - 1], R[i, j]])
 
     # =================================================================
-    # CÔNG THỨC (4): Dồn bit 0 - Điều kiện cơ sở
-    # Với mỗi i từ 2 đến n-1, j từ 1 đến min(i-1, k): (NOT X_i AND NOT R_{i-1,j}) --> (NOT R_i,j)
+    # FORMULA (4): Push bit 0 - Base condition
+    # For each i from 2 to n-1, j from 1 to min(i-1, k): (NOT X_i AND NOT R_{i-1,j}) --> (NOT R_i,j)
     # =================================================================
     for i in range(2, n):
         xi = variables[i - 1]
         for j in range(1, min(i, k) + 1):
-            if j <= i - 1:  # Đảm bảo R[i-1, j] tồn tại
+            if j <= i - 1:  # Ensure R[i-1, j] exists
                 clauses.append([xi, R[i - 1, j], -R[i, j]])
 
     # =================================================================
-    # CÔNG THỨC (5): Dồn bit 0 - Ngưỡng
-    # Với mỗi i từ 1 đến k: (NOT X_i) --> (NOT R_i,i)
+    # FORMULA (5): Push bit 0 - Threshold
+    # For each i from 1 to k: (NOT X_i) --> (NOT R_i,i)
     # =================================================================
     for i in range(1, min(n, k + 1)):
         xi = variables[i - 1]
@@ -67,8 +67,8 @@ def _base_sequential_counter(variables, k, vpool):
             clauses.append([xi, -R[i, i]])
 
     # =================================================================
-    # CÔNG THỨC (6): Dồn bit 0 - Chuyển tiếp
-    # Với mỗi i từ 2 đến n-1, j từ 2 đến min(i, k): (NOT R_{i-1,j-1}) --> (NOT R_i,j)
+    # FORMULA (6): Push bit 0 - Transition
+    # For each i from 2 to n-1, j from 2 to min(i, k): (NOT R_{i-1,j-1}) --> (NOT R_i,j)
     # =================================================================
     for i in range(2, n):
         for j in range(2, min(i, k) + 1):
@@ -78,7 +78,7 @@ def _base_sequential_counter(variables, k, vpool):
     return clauses, R
 
 def encode_nsc_at_least_k(variables, k, vpool):
-    """Mã hóa At-Least-K theo NSC gốc."""
+    """Encode At-Least-K according to original NSC."""
     n = len(variables)
     if k <= 0: 
         return []
@@ -88,20 +88,20 @@ def encode_nsc_at_least_k(variables, k, vpool):
     clauses, R = _base_sequential_counter(variables, k, vpool)
 
     # =================================================================
-    # CÔNG THỨC (7): Đảm bảo tổng cuối cùng ít nhất là k
+    # FORMULA (7): Ensure final sum is at least k
     # (R_{n-1,k}) OR (X_n AND R_{n-1,k-1})
     # =================================================================
     xn = variables[n - 1]
     
     if k == 1:
-        # Trường hợp đặc biệt k=1: ít nhất một biến phải True
+        # Special case k=1: at least one variable must be True
         clauses.append([R[n - 1, 1], xn])
     else:
-        # Trường hợp tổng quát
+        # General case
         if (n - 1, k) in R:
             if (n - 1, k - 1) in R:
                 # R_{n-1,k} OR (X_n AND R_{n-1,k-1})
-                # Tương đương: R_{n-1,k} OR X_n, R_{n-1,k} OR R_{n-1,k-1}
+                # Equivalent: R_{n-1,k} OR X_n, R_{n-1,k} OR R_{n-1,k-1}
                 clauses.append([R[n - 1, k], xn])
                 clauses.append([R[n - 1, k], R[n - 1, k - 1]])
             else:
@@ -110,7 +110,7 @@ def encode_nsc_at_least_k(variables, k, vpool):
     return clauses
 
 def encode_nsc_at_most_k(variables, k, vpool):
-    """Mã hóa At-Most-K theo NSC gốc."""
+    """Encode At-Most-K according to original NSC."""
     n = len(variables)
     if k < 0: 
         return [[1], [-1]]
@@ -120,8 +120,8 @@ def encode_nsc_at_most_k(variables, k, vpool):
     clauses, R = _base_sequential_counter(variables, k, vpool)
 
     # =================================================================
-    # CÔNG THỨC (8): Ngăn bộ đếm vượt quá k
-    # Với mỗi i từ k+1 đến n: (X_i) --> (NOT R_{i-1,k})
+    # FORMULA (8): Prevent counter from exceeding k
+    # For each i from k+1 to n: (X_i) --> (NOT R_{i-1,k})
     # =================================================================
     for i in range(k + 1, n + 1):
         xi = variables[i - 1]
@@ -131,7 +131,7 @@ def encode_nsc_at_most_k(variables, k, vpool):
     return clauses
 
 def encode_nsc_exactly_k(variables, k, vpool):
-    """Mã hóa Exactly-K bằng cách kết hợp At-Most-K và At-Least-K."""
+    """Encode Exactly-K by combining At-Most-K and At-Least-K."""
     if k < 0 or k > len(variables):
         return [[1], [-1]]
 

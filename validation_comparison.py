@@ -1,7 +1,7 @@
 # validation_comparison.py
 """
-So sánh validation methods giữa Complete DRSA và SAT-based approaches
-cho bài toán 2D Bandwidth Minimization Problem
+Compare validation methods between Complete DRSA and SAT-based approaches
+for 2D Bandwidth Minimization Problem
 """
 
 import sys
@@ -27,7 +27,7 @@ except ImportError:
 
 class ValidationComparison:
     """
-    Lớp so sánh validation methods giữa DRSA và SAT approaches
+    Class for comparing validation methods between DRSA and SAT approaches
     """
     
     def __init__(self):
@@ -70,7 +70,7 @@ class ValidationComparison:
         Validate Complete DRSA approach
         
         Returns:
-            dict: Validation results với metrics chi tiết
+            dict: Validation results with detailed metrics
         """
         if not DRSA_AVAILABLE:
             return {'status': 'unavailable', 'error': 'DRSA implementation not found'}
@@ -147,7 +147,7 @@ class ValidationComparison:
         Validate SAT-based approach
         
         Returns:
-            dict: Validation results với metrics chi tiết
+            dict: Validation results with detailed metrics
         """
         if not SAT_AVAILABLE:
             return {'status': 'unavailable', 'error': 'SAT implementation not found'}
@@ -217,7 +217,7 @@ class ValidationComparison:
     
     def run_validation_comparison(self):
         """
-        Chạy so sánh validation toàn diện
+        Run comprehensive validation comparison
         """
         print("=== VALIDATION METHODS COMPARISON ===")
         print("Comparing Complete DRSA vs SAT-based approaches")
@@ -244,7 +244,7 @@ class ValidationComparison:
     
     def compare_single_case(self, drsa_result: Dict, sat_result: Dict):
         """
-        So sánh kết quả của một test case
+        Compare results of a single test case
         """
         print(f"\n   Comparison for {drsa_result['test_case']}:")
         
@@ -269,7 +269,7 @@ class ValidationComparison:
     
     def print_comprehensive_comparison(self):
         """
-        In bảng so sánh toàn diện
+        Print comprehensive comparison table
         """
         print(f"\n" + "="*100)
         print(f"=== COMPREHENSIVE VALIDATION COMPARISON ===")
@@ -305,7 +305,7 @@ class ValidationComparison:
     
     def print_validation_analysis(self):
         """
-        In phân tích validation methods
+        Print validation methods analysis
         """
         print("\n=== VALIDATION METHODS ANALYSIS ===")
         print("="*60)
@@ -329,12 +329,12 @@ class ValidationComparison:
         print(f"\nVALIDATION CHARACTERISTICS:")
         print(f"\nComplete DRSA:")
         print(f"  Strengths:")
-        print(f"     - Fast heuristic search với γ-discrimination")
+        print(f"     - Fast heuristic search with γ-discrimination")
         print(f"     - Good for large instances")
         print(f"     - Detailed convergence statistics")
         print(f"     - Academic-compliant with DRSA methodology")
         print(f"  Limitations:")
-        print(f"     - Stochastic - không guarantee optimal")
+        print(f"     - Stochastic - no guarantee of optimal")
         print(f"     - Solution quality depends on parameters")
         print(f"     - Validation based on multiple runs")
         

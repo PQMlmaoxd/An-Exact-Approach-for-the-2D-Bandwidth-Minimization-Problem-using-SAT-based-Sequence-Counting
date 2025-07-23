@@ -1,5 +1,5 @@
 # random_assignment_ub_finder.py
-# Tìm Upper Bound bằng phép gán ngẫu nhiên - Bước 1 trong strategy
+# Find Upper Bound using random assignment - Step 1 in strategy
 
 import random
 import time
@@ -8,22 +8,22 @@ import numpy as np
 
 class RandomAssignmentUBFinder:
     """
-    Tìm Upper Bound cho 2D Bandwidth Minimization bằng phép gán ngẫu nhiên
+    Find Upper Bound for 2D Bandwidth Minimization using random assignment
     
     Strategy:
-    1. Gán ngẫu nhiên vị trí X, Y cho các đỉnh
-    2. Tính bandwidth của assignment đó
-    3. Lặp lại nhiều lần để tìm best assignment
-    4. Trả về bandwidth nhỏ nhất tìm được làm Upper Bound
+    1. Randomly assign X, Y positions to vertices
+    2. Calculate bandwidth of that assignment
+    3. Repeat multiple times to find best assignment
+    4. Return smallest bandwidth found as Upper Bound
     """
     
     def __init__(self, n, edges, seed=None):
         """
-        Khởi tạo UB finder
+        Initialize UB finder
         
         Args:
-            n: Số đỉnh của đồ thị
-            edges: Danh sách cạnh [(u1,v1), (u2,v2), ...]
+            n: Number of graph vertices
+            edges: List of edges [(u1,v1), (u2,v2), ...]
             seed: Random seed for reproducibility
         """
         self.n = n
@@ -40,14 +40,14 @@ class RandomAssignmentUBFinder:
     
     def find_ub_random_search(self, max_iterations=1000, time_limit=30):
         """
-        Tìm UB bằng random search
+        Find UB using random search
         
         Args:
-            max_iterations: Số lần thử tối đa
-            time_limit: Thời gian giới hạn (seconds)
+            max_iterations: Maximum number of attempts
+            time_limit: Time limit (seconds)
             
         Returns:
-            dict: Kết quả search với UB và assignment tốt nhất
+            dict: Search results with best UB and assignment
         """
         print(f"\n=== RANDOM SEARCH FOR UPPER BOUND ===")
         print(f"Max iterations: {max_iterations}, Time limit: {time_limit}s")
@@ -62,14 +62,14 @@ class RandomAssignmentUBFinder:
                 print(f"Time limit reached after {iteration} iterations")
                 break
             
-            # Tạo assignment ngẫu nhiên
+            # Create random assignment
             x_assignment = self._random_assignment()
             y_assignment = self._random_assignment()
             
-            # Tính bandwidth
+            # Calculate bandwidth
             bandwidth = self._calculate_bandwidth(x_assignment, y_assignment)
             
-            # Cập nhật best
+            # Update best
             if bandwidth < best_ub:
                 best_ub = bandwidth
                 best_assignment = (x_assignment.copy(), y_assignment.copy())
@@ -96,18 +96,18 @@ class RandomAssignmentUBFinder:
 
     
     def _random_assignment(self):
-        """Tạo assignment hoàn toàn ngẫu nhiên"""
+        """Create completely random assignment"""
         assignment = list(range(1, self.n + 1))
         random.shuffle(assignment)
         return assignment
     
     def _calculate_bandwidth(self, x_assignment, y_assignment):
         """
-        Tính bandwidth của assignment theo định nghĩa chuẩn 2DBMP
+        Calculate bandwidth of assignment according to standard 2DBMP definition
         
         Args:
-            x_assignment: Assignment cho trục X [pos_of_vertex_1, pos_of_vertex_2, ...]
-            y_assignment: Assignment cho trục Y
+            x_assignment: Assignment for X axis [pos_of_vertex_1, pos_of_vertex_2, ...]
+            y_assignment: Assignment for Y axis
             
         Returns:
             int: Bandwidth (max Manhattan distance across all edges)
@@ -115,11 +115,11 @@ class RandomAssignmentUBFinder:
         max_bandwidth = 0
         
         for u, v in self.edges:
-            # Tính khoảng cách X và Y
+            # Calculate X and Y distances
             x_dist = abs(x_assignment[u - 1] - x_assignment[v - 1])
             y_dist = abs(y_assignment[u - 1] - y_assignment[v - 1])
             
-            # Bandwidth = x_dist + y_dist (Manhattan distance) cho 2DBMP
+            # Bandwidth = x_dist + y_dist (Manhattan distance) for 2DBMP
             edge_bandwidth = x_dist + y_dist
             max_bandwidth = max(max_bandwidth, edge_bandwidth)
         
@@ -127,10 +127,10 @@ class RandomAssignmentUBFinder:
     
     def visualize_assignment(self, assignment_result):
         """
-        Visualize assignment tốt nhất
+        Visualize best assignment
         
         Args:
-            assignment_result: Kết quả từ các hàm find_ub_*
+            assignment_result: Results from find_ub_* functions
         """
         if assignment_result['assignment'] is None:
             print("No assignment found!")
@@ -143,7 +143,7 @@ class RandomAssignmentUBFinder:
         print(f"X-axis assignment: {x_assignment}")
         print(f"Y-axis assignment: {y_assignment}")
         
-        # Tạo grid visualization
+        # Create grid visualization
         print(f"\nGrid visualization:")
         grid = [[' ' for _ in range(self.n)] for _ in range(self.n)]
         
@@ -155,7 +155,7 @@ class RandomAssignmentUBFinder:
         for row in grid:
             print('|' + '|'.join(f'{cell:^3}' for cell in row) + '|')
         
-        # Tính bandwidth chi tiết
+        # Calculate detailed bandwidth
         print(f"\nEdge bandwidth details:")
         for u, v in self.edges:
             x_dist = abs(x_assignment[u - 1] - x_assignment[v - 1])
@@ -164,7 +164,7 @@ class RandomAssignmentUBFinder:
             print(f"Edge ({u},{v}): X-dist={x_dist}, Y-dist={y_dist}, Bandwidth={bandwidth}")
 
 def test_random_ub_finder():
-    """Test function cho RandomAssignmentUBFinder"""
+    """Test function for RandomAssignmentUBFinder"""
     print("=== TESTING RANDOM UB FINDER ===")
     
     # Test graph: cycle of 4 vertices

@@ -8,46 +8,46 @@ def encode_abs_distance_final(U_vars, V_vars, n, vpool, prefix="T"):
     T_vars = [vpool.id(f'{prefix}_geq_{d}') for d in range(1, n)]
     clauses = []
     
-    # Luật Bật T (đối xứng, O(n²))
-    # ∀k,d: (V_k ∧ U_{k-d}) → T_d (cho V > U)
+    # T Activation Rules (symmetric, O(n²))
+    # ∀k,d: (V_k ∧ U_{k-d}) → T_d (for V > U)
     for k in range(1, n + 1):  # O(n)
-        for d in range(1, k):  # O(n) - d từ 1 đến k-1
-            if d - 1 < len(T_vars):  # Đảm bảo T_d tồn tại
-                u_pos = k - d  # Vị trí U cần có để khoảng cách = d
+        for d in range(1, k):  # O(n) - d from 1 to k-1
+            if d - 1 < len(T_vars):  # Ensure T_d exists
+                u_pos = k - d  # U position needed for distance = d
                 if u_pos >= 1:
                     # (V_k ∧ U_{k-d}) → T_d
-                    # Tương đương: ¬V_k ∨ ¬U_{k-d} ∨ T_d
+                    # Equivalent: ¬V_k ∨ ¬U_{k-d} ∨ T_d
                     clauses.append([-V_vars[k - 1], -U_vars[u_pos - 1], T_vars[d - 1]])
     
-    # ∀k,d: (U_k ∧ V_{k-d}) → T_d (cho U > V)
+    # ∀k,d: (U_k ∧ V_{k-d}) → T_d (for U > V)
     for k in range(1, n + 1):  # O(n)
-        for d in range(1, k):  # O(n) - d từ 1 đến k-1
-            if d - 1 < len(T_vars):  # Đảm bảo T_d tồn tại
-                v_pos = k - d  # Vị trí V cần có để khoảng cách = d
+        for d in range(1, k):  # O(n) - d from 1 to k-1
+            if d - 1 < len(T_vars):  # Ensure T_d exists
+                v_pos = k - d  # V position needed for distance = d
                 if v_pos >= 1:
                     # (U_k ∧ V_{k-d}) → T_d
-                    # Tương đương: ¬U_k ∨ ¬V_{k-d} ∨ T_d
+                    # Equivalent: ¬U_k ∨ ¬V_{k-d} ∨ T_d
                     clauses.append([-U_vars[k - 1], -V_vars[v_pos - 1], T_vars[d - 1]])
     
-    # Luật Tắt T (chặt chẽ, O(n²))
-    # ∀k,d: (V_k ∧ U_{k-d}) → ¬T_{d+1} (cho V > U)
+    # T Deactivation Rules (tight, O(n²))
+    # ∀k,d: (V_k ∧ U_{k-d}) → ¬T_{d+1} (for V > U)
     for k in range(1, n + 1):  # O(n)
-        for d in range(1, k):  # O(n) - d từ 1 đến k-1
-            if d < len(T_vars):  # Đảm bảo T_{d+1} tồn tại
-                u_pos = k - d  # Vị trí U để khoảng cách = d
+        for d in range(1, k):  # O(n) - d from 1 to k-1
+            if d < len(T_vars):  # Ensure T_{d+1} exists
+                u_pos = k - d  # U position for distance = d
                 if u_pos >= 1:
                     # (V_k ∧ U_{k-d}) → ¬T_{d+1}
-                    # Tương đương: ¬V_k ∨ ¬U_{k-d} ∨ ¬T_{d+1}
+                    # Equivalent: ¬V_k ∨ ¬U_{k-d} ∨ ¬T_{d+1}
                     clauses.append([-V_vars[k - 1], -U_vars[u_pos - 1], -T_vars[d]])
     
-    # ∀k,d: (U_k ∧ V_{k-d}) → ¬T_{d+1} (cho U > V)
+    # ∀k,d: (U_k ∧ V_{k-d}) → ¬T_{d+1} (for U > V)
     for k in range(1, n + 1):  # O(n)
-        for d in range(1, k):  # O(n) - d từ 1 đến k-1
-            if d < len(T_vars):  # Đảm bảo T_{d+1} tồn tại
-                v_pos = k - d  # Vị trí V để khoảng cách = d
+        for d in range(1, k):  # O(n) - d from 1 to k-1
+            if d < len(T_vars):  # Ensure T_{d+1} exists
+                v_pos = k - d  # V position for distance = d
                 if v_pos >= 1:
                     # (U_k ∧ V_{k-d}) → ¬T_{d+1}
-                    # Tương đương: ¬U_k ∨ ¬V_{k-d} ∨ ¬T_{d+1}
+                    # Equivalent: ¬U_k ∨ ¬V_{k-d} ∨ ¬T_{d+1}
                     clauses.append([-U_vars[k - 1], -V_vars[v_pos - 1], -T_vars[d]])
     
     # CRITICAL FIX: Add constraints for distance = 0 case
@@ -57,7 +57,7 @@ def encode_abs_distance_final(U_vars, V_vars, n, vpool, prefix="T"):
             # (U_k ∧ V_k) → ¬T_1 (same position → distance < 1)
             clauses.append([-U_vars[k - 1], -V_vars[k - 1], -T_vars[0]])
     
-    # Luật Đơn điệu: ¬T_d → ¬T_{d+1} (bit propagation từ trái sang phải)
+    # Monotonicity Rules: ¬T_d → ¬T_{d+1} (bit propagation from left to right)
     for d in range(1, len(T_vars)):
         clauses.append([T_vars[d - 1], -T_vars[d]])
     
