@@ -12,9 +12,9 @@ try:
     from distance_encoder import encode_abs_distance_final
     from random_assignment_ub_finder import RandomAssignmentUBFinder
     from nsc_encoder import encode_nsc_exactly_k, encode_nsc_at_most_k
-    print("✅ Successfully imported essential modules including NSC encoder")
+    print("Successfully imported essential modules including NSC encoder")
 except ImportError as e:
-    print(f"❌ Critical import error: {e}")
+    print(f"Critical import error: {e}")
     print("NSC encoder is required for O(n²) complexity optimization")
     raise ImportError("Missing required NSC encoder - cannot proceed without it")
 
@@ -97,23 +97,22 @@ class BandwidthOptimizationSolver:
     
     def encode_position_constraints(self):
         """
-        Mã hóa ràng buộc: mỗi đỉnh có đúng một vị trí trên mỗi trục - NSC ONLY VERSION
-        Độ phức tạp: O(n²)
+        Mã hóa ràng buộc vị trí: mỗi đỉnh có đúng một vị trí trên mỗi trục
+        Sử dụng NSC encoding để đạt độ phức tạp O(n²)
         """
         clauses = []
         
         for v in range(1, self.n + 1):
-            # NSC Exactly-1 encoding - O(n) clauses per constraint
-            # Exactly-One cho X using NSC
+            # Exactly-One cho X sử dụng NSC
             nsc_x_clauses = encode_nsc_exactly_k(self.X_vars[v], 1, self.vpool)
             clauses.extend(nsc_x_clauses)
             
-            # Exactly-One cho Y using NSC  
+            # Exactly-One cho Y sử dụng NSC
             nsc_y_clauses = encode_nsc_exactly_k(self.Y_vars[v], 1, self.vpool)
             clauses.extend(nsc_y_clauses)
         
-        # Mỗi position (X,Y) có tối đa một đỉnh - NSC OPTIMIZED VERSION O(n²)
-        # NSC-based position uniqueness: At most 1 node per position
+        # Mỗi vị trí (X,Y) có tối đa một đỉnh - phiên bản tối ưu NSC O(n²)
+        # Ràng buộc duy nhất vị trí: tối đa 1 node trên mỗi vị trí
         for x in range(self.n):
             for y in range(self.n):
                 # Tạo indicator variables: node_at_pos[v] = (X_v_x ∧ Y_v_y)
@@ -127,8 +126,8 @@ class BandwidthOptimizationSolver:
                     clauses.append([-indicator, self.Y_vars[v][y]])
                     clauses.append([indicator, -self.X_vars[v][x], -self.Y_vars[v][y]])
                 
-                # NSC: At most 1 node at position (x,y)  
-                # Use unified nsc_encoder.py implementation for consistency
+                # Ràng buộc NSC: tối đa 1 node tại vị trí (x,y)
+                # Sử dụng implementation thống nhất từ nsc_encoder.py
                 nsc_at_most_1 = encode_nsc_at_most_k(node_indicators, 1, self.vpool)
                 clauses.extend(nsc_at_most_1)
         
@@ -159,10 +158,10 @@ class BandwidthOptimizationSolver:
     
     def step1_test_ub_pure_random(self, K):
         """
-        Bước 1: Test UB với K bằng pure random assignment (theo ý tưởng thầy)
+        Bước 1: Kiểm tra UB với K bằng thuật toán gán ngẫu nhiên
         
         Args:
-            K: Upper bound để test
+            K: Upper bound để kiểm tra
             
         Returns:
             bool: True nếu tìm được assignment với bandwidth ≤ K, False nếu không
@@ -171,7 +170,7 @@ class BandwidthOptimizationSolver:
         print(f"Strategy: Pure random assignment without SAT encoding")
         print(f"Goal: Find assignment with bandwidth ≤ {K}")
         
-        # Sử dụng RandomAssignmentUBFinder để test K
+        # Sử dụng RandomAssignmentUBFinder để kiểm tra K
         ub_finder = RandomAssignmentUBFinder(self.n, self.edges, seed=42)
         
         # Tìm assignment với target UB = K
@@ -186,22 +185,22 @@ class BandwidthOptimizationSolver:
         print(f"- Time: {result['time']:.2f}s")
         
         if achieved_ub <= K:
-            print(f"✓ SUCCESS: Found assignment with bandwidth {achieved_ub} ≤ {K}")
+            print(f"SUCCESS: Found assignment with bandwidth {achieved_ub} ≤ {K}")
             print(f"Proceeding to Step 2 with K = {K}")
             return True
         else:
-            print(f"✗ FAILED: Best assignment has bandwidth {achieved_ub} > {K}")
+            print(f"FAILED: Best assignment has bandwidth {achieved_ub} > {K}")
             print(f"Need to try higher K value")
             return False
     
     def step2_encode_advanced_constraints(self, K):
         """
-        Bước 2: Encode đầy đủ constraints theo ý tưởng thầy
+        Bước 2: Mã hóa đầy đủ các ràng buộc nâng cao
         
         Encode: (Tx≤K) ∧ (Ty≤K) ∧ (Tx≥1 → Ty≤K-1) ∧ (Tx≥2 → Ty≤K-2) ∧ ... ∧ (Tx=K → Ty≤0)
         
         Với Thermometer encoding:
-        - Tx_i means Tx ≥ i
+        - Tx_i có nghĩa là Tx ≥ i
         - (Tx ≤ K) ≡ ¬Tx_{K+1}
         - (Tx ≥ i → Ty ≤ K-i) ≡ ¬Tx_i ∨ ¬Ty_{K-i+1}
         
@@ -249,15 +248,15 @@ class BandwidthOptimizationSolver:
             
             if result:
                 model = solver.get_model()
-                print(f"✓ K={K} is FEASIBLE with advanced encoding")
+                print(f"K={K} is FEASIBLE with advanced encoding")
                 
-                # Optional: Decode và verify solution
+                # Tùy chọn: Decode và verify solution
                 print(f"Solution found! Extracting assignment...")
                 self.extract_and_verify_solution(model, K)
                 
                 return True
             else:
-                print(f"✗ K={K} is INFEASIBLE")
+                print(f"K={K} is INFEASIBLE")
                 return False
                 
         finally:
@@ -265,7 +264,7 @@ class BandwidthOptimizationSolver:
     
     def encode_thermometer_bandwidth_constraints(self, K):
         """
-        Encode bandwidth constraints theo Thermometer encoding
+        Mã hóa bandwidth constraints theo phương pháp Thermometer encoding
         
         (Tx≤K) ∧ (Ty≤K) ∧ (Tx≥1 → Ty≤K-1) ∧ ... ∧ (Tx≥K → Ty≤0)
         
@@ -280,26 +279,26 @@ class BandwidthOptimizationSolver:
         print(f"\nEncoding Thermometer constraints for K={K}:")
         
         for edge_id in self.Tx_vars:
-            Tx = self.Tx_vars[edge_id]  # Tx[i] means Tx ≥ i+1
-            Ty = self.Ty_vars[edge_id]  # Ty[i] means Ty ≥ i+1
+            Tx = self.Tx_vars[edge_id]  # Tx[i] nghĩa là Tx ≥ i+1
+            Ty = self.Ty_vars[edge_id]  # Ty[i] nghĩa là Ty ≥ i+1
             
             print(f"  {edge_id}: Tx_vars={len(Tx)}, Ty_vars={len(Ty)}")
             
             # 1. (Tx ≤ K) ≡ ¬Tx_{K+1}
-            if K < len(Tx):  # Tx[K] means Tx ≥ K+1
+            if K < len(Tx):  # Tx[K] nghĩa là Tx ≥ K+1
                 clauses.append([-Tx[K]])
                 print(f"    Added: Tx ≤ {K} (¬Tx_{K+1})")
             
             # 2. (Ty ≤ K) ≡ ¬Ty_{K+1}  
-            if K < len(Ty):  # Ty[K] means Ty ≥ K+1
+            if K < len(Ty):  # Ty[K] nghĩa là Ty ≥ K+1
                 clauses.append([-Ty[K]])
                 print(f"    Added: Ty ≤ {K} (¬Ty_{K+1})")
             
-            # 3. Implication constraints: (Tx ≥ i → Ty ≤ K-i)
+            # 3. Ràng buộc hàm ý: (Tx ≥ i → Ty ≤ K-i)
             for i in range(1, K + 1):
                 if K - i >= 0:
-                    # Tx ≥ i is represented by Tx[i-1] 
-                    # Ty ≤ K-i is represented by ¬Ty[K-i] (since Ty[K-i] means Ty ≥ K-i+1)
+                    # Tx ≥ i được biểu diễn bởi Tx[i-1] 
+                    # Ty ≤ K-i được biểu diễn bởi ¬Ty[K-i] (vì Ty[K-i] nghĩa là Ty ≥ K-i+1)
                     
                     tx_geq_i = None
                     ty_leq_ki = None
@@ -310,8 +309,8 @@ class BandwidthOptimizationSolver:
                     if K-i < len(Ty):
                         ty_leq_ki = -Ty[K-i]  # Ty ≤ K-i
                     
-                    # Add implication: Tx ≥ i → Ty ≤ K-i
-                    # Equivalent: ¬Tx_i ∨ ¬Ty_{K-i+1}
+                    # Thêm hàm ý: Tx ≥ i → Ty ≤ K-i
+                    # Tương đương: ¬Tx_i ∨ ¬Ty_{K-i+1}
                     if tx_geq_i is not None and ty_leq_ki is not None:
                         clauses.append([-tx_geq_i, ty_leq_ki])
                         print(f"    Added: Tx≥{i} → Ty≤{K-i} (¬Tx_{i} ∨ ¬Ty_{K-i+1})")
@@ -321,7 +320,7 @@ class BandwidthOptimizationSolver:
     
     def extract_and_verify_solution(self, model, K):
         """
-        Extract và verify SAT solution
+        Trích xuất và xác minh solution từ SAT
         """
         print(f"\n--- Solution Verification ---")
         
@@ -364,20 +363,20 @@ class BandwidthOptimizationSolver:
             print(f"  Edge ({u},{v}): distance = {distance}")
         
         print(f"\nBandwidth = {max_distance}")
-        print(f"Constraint K={K} satisfied: {'✓' if max_distance <= K else '✗'}")
+        print(f"Constraint K={K} satisfied: {'Yes' if max_distance <= K else 'No'}")
         
         return max_distance <= K
     
     def solve_bandwidth_optimization(self, start_k=None, end_k=None):
         """
-        Main workflow theo ý tưởng thầy:
+        Quy trình chính để tối ưu hóa bandwidth:
         
-        1. Test UB với pure random assignment cho các K từ 1 đến 2(n-1)
+        1. Kiểm tra UB với thuật toán gán ngẫu nhiên cho các K từ 1 đến 2(n-1)
         2. Khi tìm được K khả thi, chuyển sang bước 2 với SAT encoding đầy đủ
         
         Args:
-            start_k: K bắt đầu test (default: 1)
-            end_k: K kết thúc test (default: 2(n-1))
+            start_k: K bắt đầu kiểm tra (mặc định: 1)
+            end_k: K kết thúc kiểm tra (mặc định: 2(n-1))
             
         Returns:
             int: Bandwidth tối ưu tìm được
@@ -388,13 +387,13 @@ class BandwidthOptimizationSolver:
             end_k = 2 * (self.n - 1)
         
         print(f"\n" + "="*80)
-        print(f"BANDWIDTH OPTIMIZATION - TEACHER'S APPROACH")
+        print(f"BANDWIDTH OPTIMIZATION - ADVANCED APPROACH")
         print(f"Graph: {self.n} nodes, {len(self.edges)} edges")
         print(f"Testing K range: {start_k} to {end_k}")
         print(f"="*80)
         
-        # Phase 1: Tìm UB bằng pure random assignment
-        print(f"\n🔍 PHASE 1: Finding feasible UB with pure random assignment")
+        # Phase 1: Tìm UB bằng thuật toán gán ngẫu nhiên
+        print(f"\nPHASE 1: Finding feasible UB with pure random assignment")
         
         feasible_ub = None
         
@@ -403,18 +402,18 @@ class BandwidthOptimizationSolver:
             
             if self.step1_test_ub_pure_random(K):
                 feasible_ub = K
-                print(f"✅ Found feasible UB = {K}")
+                print(f"Found feasible UB = {K}")
                 break
             else:
-                print(f"❌ K = {K} not achievable with random assignment")
+                print(f"K = {K} not achievable with random assignment")
         
         if feasible_ub is None:
-            print(f"\n❌ ERROR: No feasible UB found in range [{start_k}, {end_k}]")
+            print(f"\nERROR: No feasible UB found in range [{start_k}, {end_k}]")
             print(f"Consider increasing end_k or checking graph connectivity")
             return None
         
         # Phase 2: SAT encoding - thử từ K = UB-1 xuống đến 1
-        print(f"\n🔧 PHASE 2: SAT encoding optimization from K={feasible_ub-1} down to 1")
+        print(f"\nPHASE 2: SAT encoding optimization from K={feasible_ub-1} down to 1")
         
         optimal_k = feasible_ub  # Mặc định là UB
         
@@ -424,21 +423,21 @@ class BandwidthOptimizationSolver:
             
             if self.step2_encode_advanced_constraints(K):
                 optimal_k = K
-                print(f"✅ K = {K} is feasible with SAT - continuing to test smaller K")
+                print(f"K = {K} is feasible with SAT - continuing to test smaller K")
             else:
-                print(f"❌ K = {K} is UNSAT - stopping search")
-                print(f"🎯 OPTIMAL BANDWIDTH = {optimal_k}")
+                print(f"K = {K} is UNSAT - stopping search")
+                print(f"OPTIMAL BANDWIDTH = {optimal_k}")
                 return optimal_k
         
         # Nếu đến K=1 vẫn SAT thì optimal = 1
-        print(f"🎯 OPTIMAL BANDWIDTH = {optimal_k} (tested down to K=1)")
+        print(f"OPTIMAL BANDWIDTH = {optimal_k} (tested down to K=1)")
         return optimal_k
 
 def test_bandwidth_solver():
     """
-    Test function theo ý tưởng thầy - Pure random UB + SAT encoding
+    Hàm kiểm tra solver với phương pháp gán ngẫu nhiên + SAT encoding
     """
-    print("=== TESTING BANDWIDTH SOLVER - TEACHER'S APPROACH ===")
+    print("=== TESTING BANDWIDTH SOLVER - ADVANCED APPROACH ===")
     
     # Test case 1: Triangle graph
     print(f"\n" + "="*60)
@@ -454,7 +453,7 @@ def test_bandwidth_solver():
     solver1.create_distance_variables()
     
     optimal1 = solver1.solve_bandwidth_optimization(start_k=1, end_k=4)
-    print(f"\n🎯 TRIANGLE RESULT: Optimal bandwidth = {optimal1}")
+    print(f"\nTRIANGLE RESULT: Optimal bandwidth = {optimal1}")
     
     # Test case 2: Path graph
     print(f"\n" + "="*60)
@@ -470,7 +469,7 @@ def test_bandwidth_solver():
     solver2.create_distance_variables()
     
     optimal2 = solver2.solve_bandwidth_optimization(start_k=1, end_k=6)
-    print(f"\n🎯 PATH RESULT: Optimal bandwidth = {optimal2}")
+    print(f"\nPATH RESULT: Optimal bandwidth = {optimal2}")
     
     # Test case 3: Cycle graph (original test)
     print(f"\n" + "="*60)
@@ -486,7 +485,7 @@ def test_bandwidth_solver():
     solver3.create_distance_variables()
     
     optimal3 = solver3.solve_bandwidth_optimization(start_k=1, end_k=8)
-    print(f"\n🎯 CYCLE RESULT: Optimal bandwidth = {optimal3}")
+    print(f"\nCYCLE RESULT: Optimal bandwidth = {optimal3}")
     
     # Summary
     print(f"\n" + "="*80)
@@ -498,5 +497,5 @@ def test_bandwidth_solver():
     print(f"="*80)
 
 if __name__ == '__main__':
-    # Test main solver
+    # Kiểm tra solver chính
     test_bandwidth_solver()

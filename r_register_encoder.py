@@ -161,19 +161,7 @@ def test_r_register_encoder(u_pos, v_pos, n):
             print(f"Test: U={u_pos}, V={v_pos} - UNSAT ERROR")
             print("-" * 50)
 
-def demonstrate_r_register_concept():
-    """
-    Minh họa concept của R register encoder
-    """
-    print("=== R Register Encoder Concept Demo ===")
-    print("Ý tưởng: Sử dụng thanh R để biểu diễn vị trí của Ux")
-    print("Thanh R: R_n |---...---| Rk |---...---| R2 |---| R1")
-    print("Nếu U_x^k = 1 thì: R1...R_{k-1} = 0, R_k...R_n = 1")
-    print("Thanh T biểu diễn khoảng cách |abs(Ux - Vx)|")
-    print("=" * 60)
-
 if __name__ == '__main__':
-    demonstrate_r_register_concept()
     
     # Test cases
     test_cases = [

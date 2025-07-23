@@ -14,39 +14,39 @@ from copy import deepcopy
 
 class TwoDBMP_DRSA:
     """
-    Complete implementation of DRSA for 2D Bandwidth Minimization Problem
-    Following the exact algorithm structure from research paper
+    Implementation đầy đủ của DRSA cho bài toán 2D Bandwidth Minimization
+    Theo đúng cấu trúc thuật toán từ research paper
     """
     
     def __init__(self, graph_vertices, graph_edges, grid_size=None, seed=42):
         """
-        Initialize DRSA solver
+        Khởi tạo DRSA solver
         
         Args:
-            graph_vertices: Number of vertices (n)
-            graph_edges: List of edges [(u, v), ...]
-            grid_size: Grid dimensions (width, height). If None, uses n x n
+            graph_vertices: Số lượng vertices (n)
+            graph_edges: Danh sách edges [(u, v), ...]
+            grid_size: Kích thước grid (width, height). Nếu None, sử dụng n x n
             seed: Random seed
         """
         self.n = graph_vertices
         self.edges = graph_edges
-        self.m = len(graph_edges)  # Number of edges
+        self.m = len(graph_edges)  # Số lượng edges
         
-        # Grid setup
+        # Thiết lập Grid
         if grid_size is None:
-            # Default: use minimum square grid that can fit n vertices
+            # Mặc định: sử dụng grid vuông nhỏ nhất có thể chứa n vertices
             grid_dim = math.ceil(math.sqrt(self.n))
             self.grid_size = (grid_dim, grid_dim)
         else:
             self.grid_size = grid_size
         
-        # DRSA Parameters
-        self.T0 = 100.0           # Initial temperature
-        self.alpha = 0.95         # Cooling rate
-        self.L = 50               # Markov chain length
-        self.T_final = 0.001      # Final temperature
+        # Tham số DRSA
+        self.T0 = 100.0           # Nhiệt độ ban đầu
+        self.alpha = 0.95         # Tốc độ làm lạnh
+        self.L = 50               # Độ dài Markov chain
+        self.T_final = 0.001      # Nhiệt độ cuối
         
-        # Neighbor operator probabilities
+        # Xác suất các toán tử neighbor
         self.p_rex = 0.4  # Random Exchange
         self.p_nex = 0.4  # Neighbor Exchange  
         self.p_rot = 0.2  # Rotation
@@ -55,7 +55,7 @@ class TwoDBMP_DRSA:
         random.seed(seed)
         np.random.seed(seed)
         
-        # Statistics
+        # Thống kê
         self.stats = {
             'iterations': 0,
             'temperature_steps': 0,
@@ -65,19 +65,19 @@ class TwoDBMP_DRSA:
     
     def generate_initial_solution(self):
         """
-        Generate initial random solution
-        Returns: φ (labeling) - mapping from vertex to (x, y) coordinate
+        Tạo solution ngẫu nhiên ban đầu
+        Returns: φ (labeling) - ánh xạ từ vertex đến tọa độ (x, y)
         """
-        # 1. Create all possible coordinates on grid
+        # 1. Tạo tất cả tọa độ có thể trên grid
         all_coords = []
         for x in range(1, self.grid_size[0] + 1):
             for y in range(1, self.grid_size[1] + 1):
                 all_coords.append((x, y))
         
-        # 2. Randomly shuffle coordinates
+        # 2. Xáo trộn ngẫu nhiên tọa độ
         random.shuffle(all_coords)
         
-        # 3. Assign each vertex to a unique coordinate
+        # 3. Gán mỗi vertex cho một tọa độ duy nhất
         phi = {}
         for v in range(1, self.n + 1):
             phi[v] = all_coords[v - 1]
@@ -86,15 +86,15 @@ class TwoDBMP_DRSA:
     
     def evaluate(self, phi):
         """
-        Advanced evaluation function following paper's Γ = β + γ/N formula
+        Hàm đánh giá nâng cao theo công thức Γ = β + γ/N trong paper
         
         Args:
-            phi: Labeling (vertex -> coordinate mapping)
+            phi: Labeling (ánh xạ từ vertex đến coordinate)
             
         Returns:
-            Gamma: Combined evaluation score
+            Gamma: Điểm đánh giá tổng hợp
         """
-        # 1. Calculate all L1 (Manhattan) distances for each edge
+        # 1. Tính tất cả khoảng cách L1 (Manhattan) cho mỗi edge
         distances = []
         for u, v in self.edges:
             coord_u = phi[u]
@@ -102,27 +102,27 @@ class TwoDBMP_DRSA:
             l1_dist = abs(coord_u[0] - coord_v[0]) + abs(coord_u[1] - coord_v[1])
             distances.append(l1_dist)
         
-        # 2. Calculate β: 2D bandwidth (maximum distance)
+        # 2. Tính β: 2D bandwidth (khoảng cách tối đa)
         beta = max(distances) if distances else 0
         
-        # 3. Build counting vector C
-        # C[d] = number of edges with L1 distance = d
+        # 3. Xây dựng counting vector C
+        # C[d] = số lượng edges có khoảng cách L1 = d
         max_dist = self.grid_size[0] + self.grid_size[1] - 2
         C = [0] * (max_dist + 1)
         for dist in distances:
             if dist <= max_dist:
                 C[dist] += 1
         
-        # 4. Calculate discriminating component γ (gamma)
-        # γ helps differentiate solutions with same β
-        # Formula: Σ C[d] * (m+1)^(d-1) for d=1 to max_dist
+        # 4. Tính discriminating component γ (gamma)
+        # γ giúp phân biệt các solution có cùng β
+        # Công thức: Σ C[d] * (m+1)^(d-1) for d=1 to max_dist
         gamma = 0
         for d in range(1, max_dist + 1):
             if C[d] > 0:
                 gamma += C[d] * ((self.m + 1) ** (d - 1))
         
-        # 5. Calculate final evaluation Γ (Gamma)
-        # N = (m+1)^β ensures γ is fractional part
+        # 5. Tính evaluation cuối cùng Γ (Gamma)
+        # N = (m+1)^β đảm bảo γ là phần thập phân
         if beta > 0:
             N = (self.m + 1) ** beta
             Gamma = beta + gamma / N
@@ -133,17 +133,17 @@ class TwoDBMP_DRSA:
     
     def generate_neighbor(self, phi):
         """
-        Generate neighbor solution using DRSA operators: REX, NEX, ROT
+        Tạo neighbor solution sử dụng các toán tử DRSA: REX, NEX, ROT
         
         Args:
-            phi: Current labeling
+            phi: Labeling hiện tại
             
         Returns:
-            phi_new: New neighboring labeling
+            phi_new: Labeling neighbor mới
         """
         phi_new = deepcopy(phi)
         
-        # Choose operator based on probabilities
+        # Chọn toán tử dựa trên xác suất
         rand = random.random()
         if rand < self.p_rex:
             op = 'REX'
@@ -155,23 +155,23 @@ class TwoDBMP_DRSA:
         vertices = list(range(1, self.n + 1))
         
         if op == 'REX':
-            # Random Exchange: Swap positions of two random vertices
+            # Random Exchange: Hoán đổi vị trí của hai vertex ngẫu nhiên
             v1, v2 = random.sample(vertices, 2)
             phi_new[v1], phi_new[v2] = phi_new[v2], phi_new[v1]
             
         elif op == 'NEX':
-            # Neighbor Exchange: Swap positions of two adjacent vertices
+            # Neighbor Exchange: Hoán đổi vị trí của hai vertex kề nhau
             if self.edges:
-                # Choose random edge and swap its endpoints
+                # Chọn edge ngẫu nhiên và hoán đổi hai endpoint
                 u, v = random.choice(self.edges)
                 phi_new[u], phi_new[v] = phi_new[v], phi_new[u]
             else:
-                # Fallback to REX if no edges
+                # Fallback về REX nếu không có edges
                 v1, v2 = random.sample(vertices, 2)
                 phi_new[v1], phi_new[v2] = phi_new[v2], phi_new[v1]
                 
         elif op == 'ROT':
-            # Rotation: Cycle positions of three random vertices
+            # Rotation: Xoay vị trí của ba vertex ngẫu nhiên
             # v1 -> v2, v2 -> v3, v3 -> v1
             if self.n >= 3:
                 v1, v2, v3 = random.sample(vertices, 3)
@@ -180,7 +180,7 @@ class TwoDBMP_DRSA:
                 phi_new[v2] = phi_new[v3]
                 phi_new[v3] = temp_pos
             else:
-                # Fallback to REX if too few vertices
+                # Fallback về REX nếu quá ít vertices
                 v1, v2 = random.sample(vertices, 2)
                 phi_new[v1], phi_new[v2] = phi_new[v2], phi_new[v1]
         
@@ -188,19 +188,19 @@ class TwoDBMP_DRSA:
     
     def TwoDBMP_DRSA(self, verbose=False):
         """
-        Main DRSA algorithm following paper's structure
+        Thuật toán DRSA chính theo cấu trúc trong paper
         
         Args:
-            verbose: Print progress information
+            verbose: In thông tin tiến trình
             
         Returns:
-            phi_best: Best labeling found
-            cost_best: Best cost (Gamma value)
-            stats: Algorithm statistics
+            phi_best: Labeling tốt nhất tìm được
+            cost_best: Cost tốt nhất (giá trị Gamma)
+            stats: Thống kê thuật toán
         """
         start_time = time.time()
         
-        # Step 1: Initialization
+        # Khởi tạo
         phi_current = self.generate_initial_solution()
         cost_current = self.evaluate(phi_current)
         phi_best = deepcopy(phi_current)
@@ -208,36 +208,36 @@ class TwoDBMP_DRSA:
         T = self.T0
         
         if verbose:
-            print(f"🚀 DRSA Algorithm Started")
+            print(f"DRSA Algorithm Started")
             print(f"   Initial cost: {cost_current:.6f}")
             print(f"   Initial temperature: {T}")
             print(f"   Cooling rate: {self.alpha}")
             print(f"   Markov chain length: {self.L}")
             print()
         
-        # Step 2: Main Simulated Annealing Loop
+        # Main Simulated Annealing Loop
         while T > self.T_final:
             if verbose:
-                print(f"🌡️  Temperature: {T:.6f} | Best cost: {cost_best:.6f}")
+                print(f"Temperature: {T:.6f} | Best cost: {cost_best:.6f}")
             
-            # Markov Chain at current temperature
+            # Markov Chain tại nhiệt độ hiện tại
             for i in range(self.L):
-                # 2.1. Generate neighbor solution
+                # Tạo neighbor solution
                 phi_candidate = self.generate_neighbor(phi_current)
                 
-                # 2.2. Evaluate new solution
+                # Đánh giá solution mới
                 cost_candidate = self.evaluate(phi_candidate)
                 
-                # 2.3. Acceptance decision
+                # Quyết định chấp nhận
                 delta_cost = cost_candidate - cost_current
                 
                 if delta_cost < 0:
-                    # Accept better solution
+                    # Chấp nhận solution tốt hơn
                     phi_current = phi_candidate
                     cost_current = cost_candidate
                     self.stats['accepted_moves'] += 1
                 else:
-                    # Accept worse solution with probability
+                    # Chấp nhận solution xấu hơn với xác suất
                     acceptance_probability = math.exp(-delta_cost / T)
                     if random.random() < acceptance_probability:
                         phi_current = phi_candidate
@@ -246,16 +246,16 @@ class TwoDBMP_DRSA:
                     else:
                         self.stats['rejected_moves'] += 1
                 
-                # 2.4. Update best solution
+                # Update best solution
                 if cost_current < cost_best:
                     phi_best = deepcopy(phi_current)
                     cost_best = cost_current
                     if verbose:
-                        print(f"   ✅ New best: {cost_best:.6f}")
+                        print(f"   New best: {cost_best:.6f}")
                 
                 self.stats['iterations'] += 1
             
-            # Step 3: Cooling
+            # Cooling
             T = T * self.alpha
             self.stats['temperature_steps'] += 1
         
@@ -265,7 +265,7 @@ class TwoDBMP_DRSA:
         self.stats['final_temperature'] = T
         
         if verbose:
-            print(f"\n🏁 DRSA Algorithm Completed")
+            print(f"\nDRSA Algorithm Completed")
             print(f"   Best cost: {cost_best:.6f}")
             print(f"   Total time: {total_time:.3f}s")
             print(f"   Iterations: {self.stats['iterations']}")
@@ -277,13 +277,13 @@ class TwoDBMP_DRSA:
     
     def extract_bandwidth(self, phi):
         """
-        Extract simple bandwidth (β) from labeling
+        Trích xuất bandwidth đơn giản (β) từ labeling
         
         Args:
             phi: Labeling
             
         Returns:
-            beta: Maximum Manhattan distance
+            beta: Khoảng cách Manhattan tối đa
         """
         if not self.edges:
             return 0
@@ -299,14 +299,14 @@ class TwoDBMP_DRSA:
     
     def print_solution(self, phi):
         """
-        Print solution in readable format
+        In ra solution dưới dạng dễ đọc
         
         Args:
-            phi: Labeling to print
+            phi: Labeling để in
         """
-        print("📋 Solution Layout:")
+        print("Solution Layout:")
         
-        # Create grid visualization
+        # Tạo grid visualization
         grid = {}
         for v in range(1, self.n + 1):
             x, y = phi[v]
@@ -326,18 +326,18 @@ class TwoDBMP_DRSA:
                     print("  .", end="")
             print()
         
-        # Print bandwidth
+        # In bandwidth
         bandwidth = self.extract_bandwidth(phi)
         gamma = self.evaluate(phi)
-        print(f"\n📊 Bandwidth (β): {bandwidth}")
-        print(f"📊 Gamma (Γ): {gamma:.6f}")
+        print(f"\nBandwidth (β): {bandwidth}")
+        print(f"Gamma (Γ): {gamma:.6f}")
 
 # Test function
 def test_drsa_paper_implementation():
     """
-    Test DRSA implementation with simple examples
+    Kiểm tra implementation DRSA với các ví dụ đơn giản
     """
-    print("🧪 Testing Complete DRSA Implementation")
+    print("Testing Complete DRSA Implementation")
     print("="*50)
     
     test_cases = [
@@ -362,30 +362,30 @@ def test_drsa_paper_implementation():
     ]
     
     for test_case in test_cases:
-        print(f"\n🔬 Test Case: {test_case['name']}")
+        print(f"\nTest Case: {test_case['name']}")
         print(f"   {test_case['description']}")
         print(f"   Vertices: {test_case['n']}, Edges: {len(test_case['edges'])}")
         
-        # Create DRSA solver
+        # Tạo DRSA solver
         drsa = TwoDBMP_DRSA(
             graph_vertices=test_case['n'],
             graph_edges=test_case['edges'],
             seed=42
         )
         
-        # Run algorithm
+        # Chạy thuật toán
         phi_best, cost_best, stats = drsa.TwoDBMP_DRSA(verbose=False)
         
-        # Extract bandwidth
+        # Trích xuất bandwidth
         bandwidth = drsa.extract_bandwidth(phi_best)
         
-        print(f"   📊 Results:")
+        print(f"   Results:")
         print(f"      Bandwidth: {bandwidth}")
         print(f"      Gamma: {cost_best:.6f}")
         print(f"      Time: {stats['total_time']:.3f}s")
         print(f"      Iterations: {stats['iterations']}")
         
-        # Print solution layout for small cases
+        # In solution layout cho các trường hợp nhỏ
         if test_case['n'] <= 4:
             drsa.print_solution(phi_best)
 

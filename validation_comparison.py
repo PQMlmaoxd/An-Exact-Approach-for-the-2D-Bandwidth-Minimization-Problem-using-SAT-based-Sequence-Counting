@@ -15,14 +15,14 @@ try:
     from complete_drsa_implementation import TwoDBMP_DRSA
     DRSA_AVAILABLE = True
 except ImportError:
-    print("⚠️  Complete DRSA implementation not available")
+    print("Complete DRSA implementation not available")
     DRSA_AVAILABLE = False
 
 try:
     from bandwidth_optimization_solver import BandwidthOptimizationSolver
     SAT_AVAILABLE = True
 except ImportError:
-    print("⚠️  SAT bandwidth solver not available")
+    print("SAT bandwidth solver not available")
     SAT_AVAILABLE = False
 
 class ValidationComparison:
@@ -57,7 +57,7 @@ class ValidationComparison:
                 'name': 'Square C4',
                 'n': 4,
                 'edges': [(1, 2), (2, 3), (3, 4), (4, 1)],
-                'expected_optimal': 2,
+                'expected_optimal': 1,
                 'description': '4-cycle graph'
             }
         ]
@@ -84,7 +84,7 @@ class ValidationComparison:
         }
         
         try:
-            print(f"\n🔬 Testing DRSA: {test_case['name']}")
+            print(f"\nTesting DRSA: {test_case['name']}")
             
             # Initialize DRSA
             drsa = TwoDBMP_DRSA(
@@ -129,7 +129,7 @@ class ValidationComparison:
                 'convergence_criterion': 'Annealing schedule completion'
             })
             
-            print(f"   ✅ DRSA Result: bandwidth={bandwidth_found}, γ={gamma_best:.6f}, time={solve_time:.2f}s")
+            print(f"   DRSA Result: bandwidth={bandwidth_found}, γ={gamma_best:.6f}, time={solve_time:.2f}s")
             
         except Exception as e:
             result.update({
@@ -138,7 +138,7 @@ class ValidationComparison:
                 'solve_time': 0,
                 'bandwidth_found': None
             })
-            print(f"   ❌ DRSA Error: {e}")
+            print(f"   DRSA Error: {e}")
         
         return result
     
@@ -161,7 +161,7 @@ class ValidationComparison:
         }
         
         try:
-            print(f"\n🔧 Testing SAT: {test_case['name']}")
+            print(f"\nTesting SAT: {test_case['name']}")
             
             # Initialize SAT solver
             solver = BandwidthOptimizationSolver(test_case['n'], 'glucose4')
@@ -193,7 +193,7 @@ class ValidationComparison:
                     'search_completeness': 'Complete (guaranteed to find optimal if exists)'
                 })
                 
-                print(f"   ✅ SAT Result: bandwidth={optimal_bandwidth}, time={solve_time:.2f}s")
+                print(f"   SAT Result: bandwidth={optimal_bandwidth}, time={solve_time:.2f}s")
             else:
                 result.update({
                     'status': 'timeout_or_error',
@@ -201,7 +201,7 @@ class ValidationComparison:
                     'solve_time': solve_time,
                     'error': 'No solution found within bounds'
                 })
-                print(f"   ❌ SAT: No solution found")
+                print(f"   SAT: No solution found")
                 
         except Exception as e:
             result.update({
@@ -210,7 +210,7 @@ class ValidationComparison:
                 'solve_time': 0,
                 'bandwidth_found': None
             })
-            print(f"   ❌ SAT Error: {e}")
+            print(f"   SAT Error: {e}")
             traceback.print_exc()
         
         return result
@@ -219,12 +219,12 @@ class ValidationComparison:
         """
         Chạy so sánh validation toàn diện
         """
-        print("🔍 === VALIDATION METHODS COMPARISON ===")
+        print("=== VALIDATION METHODS COMPARISON ===")
         print("Comparing Complete DRSA vs SAT-based approaches")
         print("="*70)
         
         for test_case in self.test_cases:
-            print(f"\n📋 Test Case: {test_case['name']} (n={test_case['n']}, E={len(test_case['edges'])})")
+            print(f"\nTest Case: {test_case['name']} (n={test_case['n']}, E={len(test_case['edges'])})")
             print(f"   Expected optimal: {test_case['expected_optimal']}")
             print(f"   Description: {test_case['description']}")
             
@@ -246,13 +246,13 @@ class ValidationComparison:
         """
         So sánh kết quả của một test case
         """
-        print(f"\n   📊 Comparison for {drsa_result['test_case']}:")
+        print(f"\n   Comparison for {drsa_result['test_case']}:")
         
         # Accuracy comparison
         drsa_optimal = drsa_result.get('is_optimal', False)
         sat_optimal = sat_result.get('is_optimal', False)
         
-        print(f"      Optimality: DRSA={'✓' if drsa_optimal else '✗'}, SAT={'✓' if sat_optimal else '✗'}")
+        print(f"      Optimality: DRSA={'Yes' if drsa_optimal else 'No'}, SAT={'Yes' if sat_optimal else 'No'}")
         
         # Time comparison
         drsa_time = drsa_result.get('solve_time', float('inf'))
@@ -272,7 +272,7 @@ class ValidationComparison:
         In bảng so sánh toàn diện
         """
         print(f"\n" + "="*100)
-        print(f"📊 === COMPREHENSIVE VALIDATION COMPARISON ===")
+        print(f"=== COMPREHENSIVE VALIDATION COMPARISON ===")
         print(f"="*100)
         
         # Summary table
@@ -286,7 +286,7 @@ class ValidationComparison:
             # DRSA row
             drsa_status = drsa_res.get('status', 'N/A')
             drsa_bw = drsa_res.get('bandwidth_found', 'N/A')
-            drsa_optimal = '✓' if drsa_res.get('is_optimal', False) else '✗'
+            drsa_optimal = 'Yes' if drsa_res.get('is_optimal', False) else 'No'
             drsa_time = f"{drsa_res.get('solve_time', 0):.2f}"
             
             print(f"{test_case['name']:<12} {'DRSA':<8} {drsa_status:<10} {str(drsa_bw):<8} {test_case['expected_optimal']:<8} {drsa_optimal:<7} {drsa_time:<8} {'Stochastic':<20}")
@@ -294,7 +294,7 @@ class ValidationComparison:
             # SAT row
             sat_status = sat_res.get('status', 'N/A')
             sat_bw = sat_res.get('bandwidth_found', 'N/A')
-            sat_optimal = '✓' if sat_res.get('is_optimal', False) else '✗'
+            sat_optimal = 'Yes' if sat_res.get('is_optimal', False) else 'No'
             sat_time = f"{sat_res.get('solve_time', 0):.2f}"
             
             print(f"{'':12} {'SAT':<8} {sat_status:<10} {str(sat_bw):<8} {test_case['expected_optimal']:<8} {sat_optimal:<7} {sat_time:<8} {'Exact/Complete':<20}")
@@ -307,7 +307,7 @@ class ValidationComparison:
         """
         In phân tích validation methods
         """
-        print("\n📈 === VALIDATION METHODS ANALYSIS ===")
+        print("\n=== VALIDATION METHODS ANALYSIS ===")
         print("="*60)
         
         # Count successful cases
@@ -326,30 +326,30 @@ class ValidationComparison:
         print(f"  SAT:  {sat_optimal_count}/{len(self.test_cases)} ({sat_optimal_count/len(self.test_cases)*100:.1f}%)")
         
         # Validation characteristics
-        print(f"\n🔍 VALIDATION CHARACTERISTICS:")
+        print(f"\nVALIDATION CHARACTERISTICS:")
         print(f"\nComplete DRSA:")
-        print(f"  ✅ Strengths:")
+        print(f"  Strengths:")
         print(f"     - Fast heuristic search với γ-discrimination")
         print(f"     - Good for large instances")
         print(f"     - Detailed convergence statistics")
         print(f"     - Academic-compliant with DRSA methodology")
-        print(f"  ❌ Limitations:")
+        print(f"  Limitations:")
         print(f"     - Stochastic - không guarantee optimal")
         print(f"     - Solution quality depends on parameters")
         print(f"     - Validation based on multiple runs")
         
         print(f"\nSAT-based Approach:")
-        print(f"  ✅ Strengths:")
+        print(f"  Strengths:")
         print(f"     - Mathematical proof of optimality")
         print(f"     - Complete search guarantee")
         print(f"     - Exact solution with verification")
         print(f"     - NSC encoding for efficiency")
-        print(f"  ❌ Limitations:")
+        print(f"  Limitations:")
         print(f"     - Can be slow for large instances")
         print(f"     - Memory intensive")
         print(f"     - Limited to smaller problem sizes")
         
-        print(f"\n🎯 RECOMMENDATION:")
+        print(f"\nRECOMMENDATION:")
         print(f"  - Use SAT for small instances requiring proven optimality")
         print(f"  - Use DRSA for large instances or when good solutions suffice")
         print(f"  - Hybrid approach: DRSA for UB, SAT for verification")
@@ -358,14 +358,14 @@ def main():
     """
     Main validation comparison
     """
-    print("🔬 Starting Validation Methods Comparison")
+    print("Starting Validation Methods Comparison")
     print("Comparing Complete DRSA vs SAT-based validation approaches")
     print("="*70)
     
     validator = ValidationComparison()
     validator.run_validation_comparison()
     
-    print(f"\n✅ Validation comparison completed!")
+    print(f"\nValidation comparison completed!")
     print(f"Results saved in validator.drsa_results and validator.sat_results")
 
 if __name__ == '__main__':

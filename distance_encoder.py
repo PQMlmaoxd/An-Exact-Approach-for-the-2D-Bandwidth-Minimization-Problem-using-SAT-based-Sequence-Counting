@@ -4,7 +4,6 @@ from pysat.formula import IDPool
 from pysat.solvers import Solver
 
 def encode_abs_distance_final(U_vars, V_vars, n, vpool, prefix="T"):
-    """Mã hóa khoảng cách O(n²) theo luật đối xứng"""
     
     T_vars = [vpool.id(f'{prefix}_geq_{d}') for d in range(1, n)]
     clauses = []
@@ -88,7 +87,7 @@ def test_final_encoder(u_pos, v_pos, n):
                     correct = False
                     break
             
-            print("✓ CORRECT" if correct else "✗ ERROR")
+            print("CORRECT" if correct else "ERROR")
         else:
             print("UNSAT - ERROR")
 
