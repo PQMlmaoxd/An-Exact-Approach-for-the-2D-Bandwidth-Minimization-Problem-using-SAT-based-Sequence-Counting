@@ -8,13 +8,20 @@ import numpy as np
 
 class RandomAssignmentUBFinder:
     """
-    Find Upper Bound for 2D Bandwidth Minimization using random assignment
+    Find Upper Bound for 2D Bandwidth Minimization using valid random assignment
     
     Strategy:
-    1. Randomly assign X, Y positions to vertices
-    2. Calculate bandwidth of that assignment
-    3. Repeat multiple times to find best assignment
+    1. Generate valid random assignments that satisfy position constraints:
+       - Each vertex gets exactly one X position and one Y position
+       - Each position gets exactly one vertex (bijection/permutation)
+    2. Calculate bandwidth of that valid assignment
+    3. Repeat multiple times to find best valid assignment
     4. Return smallest bandwidth found as Upper Bound
+    
+    Position Constraints Enforced:
+    - X assignment: permutation of [1,2,...,n] 
+    - Y assignment: permutation of [1,2,...,n]
+    - No two vertices share the same (x,y) coordinate
     """
     
     def __init__(self, n, edges, seed=None):
@@ -96,22 +103,38 @@ class RandomAssignmentUBFinder:
 
     
     def _random_assignment(self):
-        """Create completely random assignment"""
-        assignment = list(range(1, self.n + 1))
-        random.shuffle(assignment)
-        return assignment
+        """
+        Create valid random assignment with position constraints
+        
+        Ensures each vertex gets exactly one position AND
+        each position gets exactly one vertex (bijection)
+        
+        Returns:
+            list: Permutation of positions [1, 2, ..., n]
+        """
+        # Create valid permutation: each position appears exactly once
+        positions = list(range(1, self.n + 1))
+        random.shuffle(positions)
+        return positions
     
     def _calculate_bandwidth(self, x_assignment, y_assignment):
         """
         Calculate bandwidth of assignment according to standard 2DBMP definition
         
         Args:
-            x_assignment: Assignment for X axis [pos_of_vertex_1, pos_of_vertex_2, ...]
-            y_assignment: Assignment for Y axis
+            x_assignment: Valid assignment for X axis [pos_of_vertex_1, pos_of_vertex_2, ...]
+                         where each position 1..n appears exactly once
+            y_assignment: Valid assignment for Y axis (same constraint)
             
         Returns:
             int: Bandwidth (max Manhattan distance across all edges)
         """
+        # Validate assignments first
+        if not self._validate_assignment(x_assignment):
+            raise ValueError("Invalid X assignment: positions not unique")
+        if not self._validate_assignment(y_assignment):
+            raise ValueError("Invalid Y assignment: positions not unique")
+        
         max_bandwidth = 0
         
         for u, v in self.edges:
@@ -124,6 +147,25 @@ class RandomAssignmentUBFinder:
             max_bandwidth = max(max_bandwidth, edge_bandwidth)
         
         return max_bandwidth
+    
+    def _validate_assignment(self, assignment):
+        """
+        Validate that assignment satisfies position constraints
+        
+        Args:
+            assignment: List of positions for vertices
+            
+        Returns:
+            bool: True if valid (each position 1..n appears exactly once)
+        """
+        if len(assignment) != self.n:
+            return False
+        
+        # Check that all positions 1..n appear exactly once
+        sorted_assignment = sorted(assignment)
+        expected = list(range(1, self.n + 1))
+        
+        return sorted_assignment == expected
     
     def visualize_assignment(self, assignment_result):
         """
@@ -173,6 +215,31 @@ def test_random_ub_finder():
     
     finder = RandomAssignmentUBFinder(n, edges, seed=42)
     
+    # Test position constraint validation
+    print("\nTesting Position Constraints Validation:")
+    valid_assignment = [1, 3, 2, 4]
+    invalid_assignment1 = [1, 1, 2, 3]  # Position 1 appears twice
+    invalid_assignment2 = [1, 2, 3]     # Wrong length
+    invalid_assignment3 = [0, 2, 3, 4]  # Position 0 invalid
+    
+    print(f"Valid assignment {valid_assignment}: {finder._validate_assignment(valid_assignment)}")
+    print(f"Invalid assignment {invalid_assignment1}: {finder._validate_assignment(invalid_assignment1)}")
+    print(f"Invalid assignment {invalid_assignment2}: {finder._validate_assignment(invalid_assignment2)}")
+    print(f"Invalid assignment {invalid_assignment3}: {finder._validate_assignment(invalid_assignment3)}")
+    
+    # Test random assignment generation
+    print(f"\nTesting Random Assignment Generation:")
+    for i in range(5):
+        x_assign = finder._random_assignment()
+        y_assign = finder._random_assignment()
+        print(f"Trial {i+1}: X={x_assign}, Y={y_assign}")
+        print(f"  X valid: {finder._validate_assignment(x_assign)}")
+        print(f"  Y valid: {finder._validate_assignment(y_assign)}")
+        
+        # Calculate bandwidth for this valid assignment
+        bandwidth = finder._calculate_bandwidth(x_assign, y_assign)
+        print(f"  Bandwidth: {bandwidth}")
+    
     # Test random search method
     print("\nTesting Random Search:")
     result = finder.find_ub_random_search(max_iterations=1000, time_limit=15)
@@ -182,6 +249,15 @@ def test_random_ub_finder():
     print(f"Random Search UB: {result['ub']}")
     print(f"Total iterations: {result['iterations']}")
     print(f"Total time: {result['time']:.2f}s")
+    
+    # Verify final assignment is valid
+    if result['assignment'] is not None:
+        x_final, y_final = result['assignment']
+        print(f"Final assignment validation:")
+        print(f"  X assignment valid: {finder._validate_assignment(x_final)}")
+        print(f"  Y assignment valid: {finder._validate_assignment(y_final)}")
+    else:
+        print("No assignment found!")
 
 if __name__ == '__main__':
     test_random_ub_finder()
