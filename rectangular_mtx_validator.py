@@ -44,9 +44,7 @@ class RectangularMTXBandwidthValidator:
         self.filename = filename
         self.n_vertices = 0
         self.edges = []
-        self.edge_weights = {}
-        self.is_weighted = False
-        self.is_directed = False
+        # Removed: edge_weights, is_weighted, is_directed (dataset is undirected/unweighted only)
         
         # Grid dimensions
         self.n_rows = n_rows
@@ -592,9 +590,35 @@ def validate_rectangular_mtx_file(mtx_file: str, n_rows: int = None, n_cols: int
     else:
         print(f"Grid: Auto-determined")
     
+    # Search for file in common locations
     if not os.path.exists(mtx_file):
-        print(f"Error: File not found - {mtx_file}")
-        return {'status': 'file_not_found', 'filename': mtx_file}
+        search_paths = [
+            mtx_file,
+            f"mtx/{mtx_file}",
+            f"mtx/group 1/{mtx_file}",
+            f"mtx/group 2/{mtx_file}",
+            f"sample_mtx_datasets/{mtx_file}",
+            f"mtx/{mtx_file}.mtx",
+            f"mtx/group 1/{mtx_file}.mtx",
+            f"mtx/group 2/{mtx_file}.mtx",
+            f"sample_mtx_datasets/{mtx_file}.mtx"
+        ]
+        
+        found_file = None
+        for path in search_paths:
+            if os.path.exists(path):
+                found_file = path
+                print(f"Found file at: {path}")
+                break
+        
+        if found_file is None:
+            print(f"Error: File '{mtx_file}' not found")
+            print("Searched in:")
+            for path in search_paths:
+                print(f"  - {path}")
+            return {'status': 'file_not_found', 'filename': mtx_file}
+        
+        mtx_file = found_file
     
     validator = RectangularMTXBandwidthValidator(mtx_file, n_rows, n_cols)
     results = validator.run_complete_validation(solver_type)

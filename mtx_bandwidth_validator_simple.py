@@ -20,7 +20,7 @@ class SimpleMTXBandwidthValidator:
     2. ASCII grid: text-based grid visualization
     
     Features:
-        - Parses .mtx files (weighted/unweighted, directed/undirected)
+        - Parses .mtx files (undirected graphs only)
         - Validates bandwidth solutions
         - Text-only output (no matplotlib needed)
         - Works everywhere - pure Python
@@ -54,9 +54,7 @@ class SimpleMTXBandwidthValidator:
         self.filename = filename
         self.n = 0
         self.edges = []
-        self.edge_weights = {}
-        self.is_weighted = False
-        self.is_directed = False
+        # Removed: edge_weights, is_weighted, is_directed (dataset is undirected/unweighted only)
         
         self._parse_mtx_file()
     
@@ -66,7 +64,8 @@ class SimpleMTXBandwidthValidator:
         
         Handles MatrixMarket format:
         - Comments and metadata parsing
-        - Weighted/directed graph conversion to unweighted/undirected
+        - Self-loop removal
+        - Undirected graph processing only
         - Error handling for malformed files
         """
         print(f"Reading MTX file: {os.path.basename(self.filename)}")
@@ -89,11 +88,7 @@ class SimpleMTXBandwidthValidator:
                 
             # Handle comments
             if line.startswith('%'):
-                if 'kind:' in line.lower():
-                    if 'directed' in line.lower():
-                        self.is_directed = True
-                    if 'weighted' in line.lower():
-                        self.is_weighted = True
+                # Skip metadata - dataset is all undirected/unweighted
                 continue
             
             # Parse dimensions
@@ -104,7 +99,7 @@ class SimpleMTXBandwidthValidator:
                         rows, cols, nnz = map(int, parts[:3])
                         self.n = max(rows, cols)
                         print(f"Matrix: {rows}×{cols}, {nnz} entries")
-                        print(f"Graph: {'directed' if self.is_directed else 'undirected'}, {'weighted' if self.is_weighted else 'unweighted'}")
+                        print(f"Graph: undirected, unweighted (dataset standard)")
                         header_found = True
                         continue
                 except ValueError:
@@ -116,31 +111,23 @@ class SimpleMTXBandwidthValidator:
                 parts = line.split()
                 if len(parts) >= 2:
                     u, v = int(parts[0]), int(parts[1])
-                    weight = float(parts[2]) if len(parts) > 2 else 1.0
+                    # Ignore weights (parts[2]) - dataset is unweighted
                     
                     if u == v:  # skip self-loops
                         continue
                     
-                    # Convert to undirected
-                    if not self.is_directed:
-                        edge = tuple(sorted([u, v]))
-                    else:
-                        edge = (u, v)
+                    # Always convert to undirected edge (sorted tuple)
+                    edge = tuple(sorted([u, v]))
                     
                     if edge not in edges_set:
                         edges_set.add(edge)
                         self.edges.append(edge)
-                        if self.is_weighted:
-                            self.edge_weights[edge] = weight
                             
             except (ValueError, IndexError):
                 print(f"Warning: bad edge at line {line_num}: {line}")
                 continue
         
         print(f"Loaded: {self.n} vertices, {len(self.edges)} edges")
-        if self.is_weighted:
-            weights = list(self.edge_weights.values())
-            print(f"Weights: {min(weights):.3f} to {max(weights):.3f}")
     
     def solve_bandwidth_problem(self, solver_type: str = 'glucose42') -> Tuple[Optional[int], Dict, Optional[Dict]]:
         """
@@ -565,8 +552,8 @@ class SimpleMTXBandwidthValidator:
             'graph_properties': {
                 'vertices': self.n,
                 'edges': len(self.edges),
-                'is_directed': self.is_directed,
-                'is_weighted': self.is_weighted,
+                'is_directed': False,  # Dataset is undirected only
+                'is_weighted': False,  # Dataset is unweighted only
                 'density': len(self.edges) / (self.n * (self.n - 1) / 2) if self.n > 1 else 0
             },
             'solution_info': solution_info,
@@ -595,9 +582,35 @@ def validate_mtx_file(mtx_file: str, solver_type: str = 'glucose42') -> Dict:
     print(f"MTX BANDWIDTH VALIDATION TOOL")
     print(f"Target: {mtx_file}")
     
+    # Search for file in common locations
     if not os.path.exists(mtx_file):
-        print(f"Error: File not found - {mtx_file}")
-        return {'status': 'file_not_found', 'filename': mtx_file}
+        search_paths = [
+            mtx_file,
+            f"mtx/{mtx_file}",
+            f"mtx/group 1/{mtx_file}",
+            f"mtx/group 2/{mtx_file}",
+            f"sample_mtx_datasets/{mtx_file}",
+            f"mtx/{mtx_file}.mtx",
+            f"mtx/group 1/{mtx_file}.mtx",
+            f"mtx/group 2/{mtx_file}.mtx",
+            f"sample_mtx_datasets/{mtx_file}.mtx"
+        ]
+        
+        found_file = None
+        for path in search_paths:
+            if os.path.exists(path):
+                found_file = path
+                print(f"Found file at: {path}")
+                break
+        
+        if found_file is None:
+            print(f"Error: File '{mtx_file}' not found")
+            print("Searched in:")
+            for path in search_paths:
+                print(f"  - {path}")
+            return {'status': 'file_not_found', 'filename': mtx_file}
+        
+        mtx_file = found_file
     
     validator = SimpleMTXBandwidthValidator(mtx_file)
     results = validator.run_complete_validation(solver_type)
@@ -632,8 +645,12 @@ if __name__ == "__main__":
         if not os.path.exists(mtx_file):
             search_paths = [
                 f"mtx/{mtx_file}",
+                f"mtx/group 1/{mtx_file}",
+                f"mtx/group 2/{mtx_file}",
                 f"sample_mtx_datasets/{mtx_file}",
                 f"mtx/{mtx_file}.mtx",
+                f"mtx/group 1/{mtx_file}.mtx",
+                f"mtx/group 2/{mtx_file}.mtx",
                 f"sample_mtx_datasets/{mtx_file}.mtx"
             ]
             

@@ -28,14 +28,17 @@ DEFAULT_UB_MULTIPLIER = 2
 
 def parse_mtx_file(file_path):
     """
-    Parse MTX file format for n×m grid graphs
-    Returns: (grid_rows, grid_cols, edges_list)
+    Parse MTX file format for adjacency matrix graphs
+    Returns: (grid_rows, grid_cols, num_vertices, edges_list)
     
     Format interpretation:
-    - Line: rows cols nnz  => Grid dimensions: rows×cols 
-    - Entries: (i,j,val) => Edges between grid positions
+    - Line: rows cols nnz  => Matrix dimensions: rows×cols 
+    - Entries: (i,j) or (i,j,val) => Adjacency matrix entries
+    - Self-loops are ignored, weights are ignored
+    - Returns undirected graph edges only
     """
     edges = []
+    edges_set = set()
     
     with open(file_path, 'r') as f:
         # Skip header comments
@@ -45,35 +48,34 @@ def parse_mtx_file(file_path):
         
         # Read dimensions: rows cols nnz
         parts = line.strip().split()
-        grid_rows, grid_cols, nnz = int(parts[0]), int(parts[1]), int(parts[2])
+        matrix_rows, matrix_cols, nnz = int(parts[0]), int(parts[1]), int(parts[2])
         
-        print(f"MTX file: {grid_rows}×{grid_cols} grid, {nnz} entries")
+        print(f"MTX file: {matrix_rows}×{matrix_cols} matrix, {nnz} entries")
         
-        # Read matrix entries and convert to graph edges
-        positions_used = set()
+        # Parse matrix entries as adjacency matrix
         for _ in range(nnz):
             line = f.readline().strip()
             if line:
                 parts = line.split()
-                i, j = int(parts[0]), int(parts[1])  # Matrix positions (1-indexed)
+                i, j = int(parts[0]), int(parts[1])  # Vertex indices (1-indexed)
+                # Ignore weights (parts[2]) - dataset is unweighted
                 
-                # Record positions that have non-zero entries
-                positions_used.add((i, j))
-        
-        # Create edges between adjacent non-zero positions
-        positions_list = sorted(positions_used)
-        vertex_map = {pos: idx+1 for idx, pos in enumerate(positions_list)}
-        
-        # Add edges between adjacent matrix positions
-        for idx, (i1, j1) in enumerate(positions_list):
-            for i2, j2 in positions_list[idx+1:]:
-                # Add edge if positions are adjacent or connected
-                if abs(i1-i2) + abs(j1-j2) == 1:  # Adjacent positions
-                    v1, v2 = vertex_map[(i1,j1)], vertex_map[(i2,j2)]
-                    edges.append((v1, v2))
+                # Skip self-loops
+                if i == j:
+                    continue
+                    
+                # Convert to undirected edge (sorted tuple)
+                edge = tuple(sorted([i, j]))
+                
+                if edge not in edges_set:
+                    edges_set.add(edge)
+                    edges.append(edge)
     
-    print(f"Grid: {grid_rows}×{grid_cols}, Positions used: {len(positions_used)}, Edges: {len(edges)}")
-    return grid_rows, grid_cols, len(positions_used), edges
+    # Number of vertices is the maximum vertex index
+    num_vertices = max(matrix_rows, matrix_cols) if edges else matrix_rows
+    
+    print(f"Graph: {num_vertices} vertices, {len(edges)} edges (undirected, unweighted)")
+    return matrix_rows, matrix_cols, num_vertices, edges
 
 class RectangularBandwidthOptimizationSolver:
     """

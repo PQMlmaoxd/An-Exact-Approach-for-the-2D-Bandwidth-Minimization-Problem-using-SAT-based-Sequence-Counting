@@ -484,4 +484,158 @@ def test_bandwidth_solver():
     print(f"="*60)
 
 if __name__ == '__main__':
-    test_bandwidth_solver()
+    """
+    Command line usage: python bandwidth_optimization_solver.py [mtx_file] [solver]
+    
+    Examples:
+        python bandwidth_optimization_solver.py 8.jgl009.mtx glucose42
+        python bandwidth_optimization_solver.py cage3.mtx cadical195
+        python bandwidth_optimization_solver.py complete_k4.mtx
+        python bandwidth_optimization_solver.py  # Run test mode
+    """
+    import sys
+    
+    # Check if MTX file provided
+    if len(sys.argv) >= 2:
+        # MTX file mode
+        mtx_file = sys.argv[1]
+        solver_type = sys.argv[2] if len(sys.argv) >= 3 else 'glucose42'
+        
+        print("=" * 80)
+        print("2D BANDWIDTH OPTIMIZATION SOLVER")
+        print("=" * 80)
+        print(f"File: {mtx_file}")
+        print(f"Solver: {solver_type.upper()}")
+        
+        # Search for file in common locations
+        if not os.path.exists(mtx_file):
+            search_paths = [
+                mtx_file,
+                f"mtx/{mtx_file}",
+                f"mtx/group 1/{mtx_file}",
+                f"mtx/group 2/{mtx_file}",
+                f"sample_mtx_datasets/{mtx_file}",
+                f"mtx/{mtx_file}.mtx",
+                f"mtx/group 1/{mtx_file}.mtx", 
+                f"mtx/group 2/{mtx_file}.mtx",
+                f"sample_mtx_datasets/{mtx_file}.mtx"
+            ]
+            
+            found_file = None
+            for path in search_paths:
+                if os.path.exists(path):
+                    found_file = path
+                    print(f"Found file at: {path}")
+                    break
+            
+            if found_file is None:
+                print(f"Error: File '{mtx_file}' not found")
+                print("Searched in:")
+                for path in search_paths:
+                    print(f"  - {path}")
+                sys.exit(1)
+            
+            mtx_file = found_file
+        
+        # Parse MTX file
+        def parse_mtx_file(filename):
+            """Parse MTX file and return n, edges"""
+            print(f"Reading MTX file: {os.path.basename(filename)}")
+            
+            try:
+                with open(filename, 'r') as f:
+                    lines = f.readlines()
+            except FileNotFoundError:
+                print(f"File not found: {filename}")
+                return None, None
+            
+            header_found = False
+            edges_set = set()
+            n = 0
+            
+            for line_num, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                if not line or line.startswith('%'):
+                    continue
+                
+                # Parse dimensions
+                if not header_found:
+                    try:
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            rows, cols, nnz = map(int, parts[:3])
+                            n = max(rows, cols)
+                            print(f"Matrix: {rows}×{cols}, {nnz} entries")
+                            print(f"Graph: undirected, unweighted")
+                            header_found = True
+                            continue
+                    except ValueError:
+                        continue
+                
+                # Parse edges
+                try:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        u, v = int(parts[0]), int(parts[1])
+                        
+                        if u == v:  # skip self-loops
+                            continue
+                        
+                        # Convert to undirected edge
+                        edge = tuple(sorted([u, v]))
+                        edges_set.add(edge)
+                            
+                except (ValueError, IndexError):
+                    continue
+            
+            edges = list(edges_set)
+            print(f"Loaded: {n} vertices, {len(edges)} edges")
+            return n, edges
+        
+        # Parse graph
+        n, edges = parse_mtx_file(mtx_file)
+        if n is None or edges is None:
+            print("Failed to parse MTX file")
+            sys.exit(1)
+        
+        # Solve bandwidth problem
+        print(f"\nSolving 2D bandwidth minimization...")
+        print(f"Problem: {n} vertices on {n}×{n} grid")
+        print(f"Using: {solver_type.upper()}")
+        
+        solver = BandwidthOptimizationSolver(n, solver_type)
+        solver.set_graph_edges(edges)
+        solver.create_position_variables()
+        solver.create_distance_variables()
+        
+        start_time = time.time()
+        optimal_bandwidth = solver.solve_bandwidth_optimization()
+        solve_time = time.time() - start_time
+        
+        # Results
+        print(f"\n" + "="*60)
+        print(f"FINAL RESULTS")
+        print(f"="*60)
+        
+        if optimal_bandwidth is not None:
+            print(f"✓ Optimal bandwidth: {optimal_bandwidth}")
+            print(f"✓ Solve time: {solve_time:.2f}s")
+            print(f"✓ Graph: {n} vertices, {len(edges)} edges")
+            print(f"✓ Solver: {solver_type.upper()}")
+            print(f"✓ Status: SUCCESS")
+        else:
+            print(f"✗ No solution found")
+            print(f"✗ Solve time: {solve_time:.2f}s")
+            print(f"✗ Status: FAILED")
+        
+        print(f"="*60)
+        
+    else:
+        # Test mode - run original test cases
+        print("=" * 80)
+        print("2D BANDWIDTH OPTIMIZATION SOLVER - TEST MODE")
+        print("=" * 80)
+        print("Usage: python bandwidth_optimization_solver.py [mtx_file] [solver]")
+        print("Running built-in test cases...")
+        test_bandwidth_solver()
