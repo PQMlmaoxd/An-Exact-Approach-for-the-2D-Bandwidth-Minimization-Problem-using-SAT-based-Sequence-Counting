@@ -4,6 +4,7 @@
 
 from pysat.formula import IDPool
 from pysat.solvers import Glucose42, Cadical195, Solver
+from pysat.card import CardEnc, EncType
 import random
 import time
 import sys
@@ -13,12 +14,12 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from distance_encoder import encode_abs_distance_final
     from random_assignment_ub_finder import RandomAssignmentUBFinder
-    from nsc_encoder import encode_nsc_exactly_k, encode_nsc_at_most_k
+    # Using PySAT Sequential Counter instead of NSC
     from position_constraints import encode_all_position_constraints, create_position_variables
     print("All modules loaded OK")
 except ImportError as e:
     print(f"Import error: {e}")
-    print("Need NSC encoder module")
+    print("Need required modules")
     raise ImportError("Missing required modules")
 
 # Basic constants
@@ -194,28 +195,19 @@ class RectangularBandwidthOptimizationSolver:
         1. Each vertex gets exactly one X position (1 to n_rows)
         2. Each vertex gets exactly one Y position (1 to n_cols)  
         3. Each grid position (x,y) gets at most one vertex
+        Uses Sequential Counter encoding for efficient constraint generation.
         """
         clauses = []
         
-        # 1. Each vertex gets exactly one X position
+        # 1. Each vertex gets exactly one X position using Sequential Counter
         for v in range(1, self.num_vertices + 1):
-            # At least one X position
-            clauses.append(self.X_vars[v])
-            
-            # At most one X position (pairwise exclusion)
-            for i in range(self.n_rows):
-                for j in range(i + 1, self.n_rows):
-                    clauses.append([-self.X_vars[v][i], -self.X_vars[v][j]])
+            sc_x_clauses = CardEnc.equals(self.X_vars[v], 1, vpool=self.vpool, encoding=EncType.seqcounter)
+            clauses.extend(sc_x_clauses.clauses)
         
-        # 2. Each vertex gets exactly one Y position
+        # 2. Each vertex gets exactly one Y position using Sequential Counter
         for v in range(1, self.num_vertices + 1):
-            # At least one Y position
-            clauses.append(self.Y_vars[v])
-            
-            # At most one Y position (pairwise exclusion)
-            for i in range(self.n_cols):
-                for j in range(i + 1, self.n_cols):
-                    clauses.append([-self.Y_vars[v][i], -self.Y_vars[v][j]])
+            sc_y_clauses = CardEnc.equals(self.Y_vars[v], 1, vpool=self.vpool, encoding=EncType.seqcounter)
+            clauses.extend(sc_y_clauses.clauses)
         
         # 3. Each grid position gets at most one vertex
         for x_pos in range(self.n_rows):
@@ -235,10 +227,9 @@ class RectangularBandwidthOptimizationSolver:
                     # (X_vars[v][x_pos] ∧ Y_vars[v][y_pos]) → pos_var
                     clauses.append([-self.X_vars[v][x_pos], -self.Y_vars[v][y_pos], pos_var])
                 
-                # At most one vertex at each position
-                for i in range(len(vertices_at_pos)):
-                    for j in range(i + 1, len(vertices_at_pos)):
-                        clauses.append([-vertices_at_pos[i], -vertices_at_pos[j]])
+                # At most one vertex at each position using Sequential Counter
+                sc_at_most_1 = CardEnc.atmost(vertices_at_pos, 1, vpool=self.vpool, encoding=EncType.seqcounter)
+                clauses.extend(sc_at_most_1.clauses)
         
         print(f"Position constraints: {len(clauses)} clauses")
         return clauses

@@ -4,6 +4,7 @@
 
 from pysat.formula import IDPool
 from pysat.solvers import Glucose42, Cadical195, Solver
+from pysat.card import CardEnc, EncType
 import random
 import time
 import sys
@@ -12,12 +13,12 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from distance_encoder import encode_abs_distance_final
     from random_assignment_ub_finder import RandomAssignmentUBFinder
-    from nsc_encoder import encode_nsc_exactly_k, encode_nsc_at_most_k
+    # Using PySAT Sequential Counter instead of NSC
     from position_constraints import encode_all_position_constraints, create_position_variables
     print("All modules loaded OK")
 except ImportError as e:
     print(f"Import error: {e}")
-    print("Need NSC encoder module")
+    print("Need required modules")
     raise ImportError("Missing required modules")
 
 # Basic constants
@@ -50,7 +51,7 @@ class BandwidthOptimizationSolver:
     
     Two-phase approach:
     1. Random assignment to find upper bound
-    2. SAT encoding with NSC and Thermometer constraints
+    2. SAT encoding with Sequential Counter and Thermometer constraints
     """
     
     def __init__(self, n, solver_type='glucose42'):
@@ -91,7 +92,7 @@ class BandwidthOptimizationSolver:
         """
         Position constraints: each vertex gets exactly one position on each axis
         Each position can have at most one vertex
-        Uses NSC encoding for O(n²) complexity
+        Uses Sequential Counter encoding for O(n²) complexity
         """
         return encode_all_position_constraints(self.n, self.X_vars, self.Y_vars, self.vpool)
     

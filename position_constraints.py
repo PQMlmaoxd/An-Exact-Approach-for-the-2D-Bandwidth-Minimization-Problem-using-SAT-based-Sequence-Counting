@@ -2,26 +2,26 @@
 # Position constraint encoding for 2D Bandwidth Minimization Problem
 
 from pysat.formula import IDPool
-from nsc_encoder import encode_nsc_exactly_k, encode_nsc_at_most_k
+from pysat.card import CardEnc, EncType
 
 def encode_vertex_position_constraints(n, X_vars, Y_vars, vpool):
     """
     Each vertex gets exactly one X and Y position
     
-    Uses NSC exactly-k encoding for efficient constraint generation.
+    Uses Sequential Counter exactly-k encoding for efficient constraint generation.
     """
     clauses = []
     
     print(f"Encoding vertex position constraints for {n} vertices...")
     
     for v in range(1, n + 1):
-        # Exactly-One for X using NSC
-        nsc_x_clauses = encode_nsc_exactly_k(X_vars[v], 1, vpool)
-        clauses.extend(nsc_x_clauses)
+        # Exactly-One for X using Sequential Counter
+        sc_x_clauses = CardEnc.equals(X_vars[v], 1, vpool=vpool, encoding=EncType.seqcounter)
+        clauses.extend(sc_x_clauses.clauses)
         
-        # Exactly-One for Y using NSC
-        nsc_y_clauses = encode_nsc_exactly_k(Y_vars[v], 1, vpool)
-        clauses.extend(nsc_y_clauses)
+        # Exactly-One for Y using Sequential Counter
+        sc_y_clauses = CardEnc.equals(Y_vars[v], 1, vpool=vpool, encoding=EncType.seqcounter)
+        clauses.extend(sc_y_clauses.clauses)
     
     print(f"Generated {len(clauses)} clauses for vertex position constraints")
     return clauses
@@ -30,7 +30,7 @@ def encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool):
     """
     Each grid position (x,y) gets at most one vertex
     
-    Creates indicator variables and uses NSC at-most-k encoding
+    Creates indicator variables and uses Sequential Counter at-most-k encoding
     for O(n²) complexity per position.
     """
     clauses = []
@@ -54,9 +54,9 @@ def encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool):
                 # (X_v_x ∧ Y_v_y) → indicator
                 clauses.append([indicator, -X_vars[v][x], -Y_vars[v][y]])
             
-            # NSC constraint: at most 1 node at position (x,y)
-            nsc_at_most_1 = encode_nsc_at_most_k(node_indicators, 1, vpool)
-            clauses.extend(nsc_at_most_1)
+            # Sequential Counter constraint: at most 1 node at position (x,y)
+            sc_at_most_1 = CardEnc.atmost(node_indicators, 1, vpool=vpool, encoding=EncType.seqcounter)
+            clauses.extend(sc_at_most_1.clauses)
     
     print(f"Generated {len(clauses)} clauses for position uniqueness")
     return clauses
@@ -67,6 +67,7 @@ def encode_all_position_constraints(n, X_vars, Y_vars, vpool):
     
     Combines vertex position constraints (exactly-one) with
     position uniqueness constraints (at-most-one).
+    Uses Sequential Counter encoding for efficient constraint generation.
     """
     print(f"\nEncoding position constraints")
     print(f"Problem: {n} vertices on {n}x{n} grid")
