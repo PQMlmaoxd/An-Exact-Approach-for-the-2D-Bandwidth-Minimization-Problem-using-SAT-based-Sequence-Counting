@@ -139,6 +139,90 @@ class TimeoutBandwidthOptimizationSolver:
             self.Tx_vars[edge_id] = [self.vpool.id(f'Tx_{edge_id}_{d}') for d in range(1, self.n)]
             self.Ty_vars[edge_id] = [self.vpool.id(f'Ty_{edge_id}_{d}') for d in range(1, self.n)]
     
+    def _create_solver(self):
+        """Create SAT solver instance (from main solver)"""
+        if self.solver_type == 'glucose42':
+            return Glucose42()
+        elif self.solver_type == 'cadical195':
+            return Cadical195()
+        else:
+            print(f"Unknown solver '{self.solver_type}', using Glucose42")
+            return Glucose42()
+    
+    def encode_position_constraints(self):
+        """
+        Position constraints: each vertex gets exactly one position on each axis
+        Each position can have at most one vertex
+        Uses Sequential Counter encoding for O(n²) complexity (from main solver)
+        """
+        return encode_all_position_constraints(self.n, self.X_vars, self.Y_vars, self.vpool)
+    
+    def encode_distance_constraints(self):
+        """Encode distance constraints for each edge (from main solver)"""
+        clauses = []
+        
+        for edge_id, (u, v) in zip([f'edge_{u}_{v}' for u, v in self.edges], self.edges):
+            # X distance encoding
+            Tx_vars, Tx_clauses = encode_abs_distance_final(
+                self.X_vars[u], self.X_vars[v], self.n, self.vpool, f"Tx_{edge_id}"
+            )
+            self.Tx_vars[edge_id] = Tx_vars
+            clauses.extend(Tx_clauses)
+            
+            # Y distance encoding
+            Ty_vars, Ty_clauses = encode_abs_distance_final(
+                self.Y_vars[u], self.Y_vars[v], self.n, self.vpool, f"Ty_{edge_id}"
+            )
+            self.Ty_vars[edge_id] = Ty_vars
+            clauses.extend(Ty_clauses)
+        
+        return clauses
+    
+    def encode_thermometer_bandwidth_constraints(self, K):
+        """
+        Encode bandwidth <= K using thermometer encoding (from main solver)
+        
+        For each edge: (Tx<=K) ∧ (Ty<=K) ∧ (Tx>=i → Ty<=K-i)
+        """
+        clauses = []
+        
+        print(f"Encoding thermometer for K={K}:")
+        
+        for edge_id in self.Tx_vars:
+            Tx = self.Tx_vars[edge_id]  # Tx[i] means Tx >= i+1
+            Ty = self.Ty_vars[edge_id]  # Ty[i] means Ty >= i+1
+            
+            print(f"  {edge_id}: {len(Tx)} Tx vars, {len(Ty)} Ty vars")
+            
+            # Tx <= K (i.e., not Tx >= K+1)
+            if K < len(Tx):
+                clauses.append([-Tx[K]])
+                print(f"    Tx <= {K}")
+            
+            # Ty <= K (i.e., not Ty >= K+1)
+            if K < len(Ty):
+                clauses.append([-Ty[K]])
+                print(f"    Ty <= {K}")
+            
+            # Implication: Tx >= i → Ty <= K-i
+            for i in range(1, K + 1):
+                if K - i >= 0:
+                    tx_geq_i = None
+                    ty_leq_ki = None
+                    
+                    if i-1 < len(Tx):
+                        tx_geq_i = Tx[i-1]  # Tx >= i
+                    
+                    if K-i < len(Ty):
+                        ty_leq_ki = -Ty[K-i]  # Ty <= K-i
+                    
+                    if tx_geq_i is not None and ty_leq_ki is not None:
+                        clauses.append([-tx_geq_i, ty_leq_ki])
+                        print(f"    Tx>={i} → Ty<={K-i}")
+        
+        print(f"Generated {len(clauses)} thermometer clauses")
+        return clauses
+
     def _check_total_timeout(self):
         """Check if total solver timeout has been exceeded"""
         if not self.timeout_config.enable_total_timeout or not self.solve_start_time:
@@ -471,24 +555,82 @@ class TimeoutBandwidthOptimizationSolver:
         return None
     
     def _optimize_with_sat_phase2_with_timeout(self, feasible_ub):
-        """Phase 2: Incremental SAT optimization with timeout protection"""
-        print(f"\nPhase 2: Incremental SAT optimization (timeout-protected)")
-        print(f"Starting from K={feasible_ub-1} down to 1")
+        """Phase 2: Incremental SAT optimization with timeout protection (Process-based)"""
+        print(f"\nPhase 2: Incremental SAT optimization from K={feasible_ub-1} down to 1")
+        print(f"Using process-based timeout protection for each SAT solve")
+        
+        # Prepare base constraints once (position + distance)
+        print(f"Preparing base constraints (position + distance)...")
+        
+        position_clauses = self.encode_position_constraints()
+        distance_clauses = self.encode_distance_constraints()
+        base_clauses = position_clauses + distance_clauses
+        
+        print(f"  Position: {len(position_clauses)} clauses")
+        print(f"  Distance: {len(distance_clauses)} clauses")
+        print(f"  Total base: {len(base_clauses)} clauses")
         
         optimal_k = feasible_ub
         
-        # Incremental SAT: try smaller K values
+        # Incremental SAT: try smaller K values with process-based timeout
         for K in range(feasible_ub - 1, 0, -1):
             self._check_total_timeout()  # Check total timeout
             
-            print(f"\nTrying K = {K} with incremental SAT")
+            print(f"\nTrying K = {K} with process-based SAT timeout")
             
-            if self.step2_encode_advanced_constraints_with_timeout(K):
+            # Prepare bandwidth constraints for this K
+            bandwidth_clauses = self.encode_thermometer_bandwidth_constraints(K)
+            print(f"  Generated {len(bandwidth_clauses)} bandwidth clauses for K={K}")
+            
+            # Combine all constraints for this K
+            all_current_clauses = base_clauses + bandwidth_clauses
+            print(f"  Total clauses for K={K}: {len(all_current_clauses)}")
+            
+            # Solve with current constraints using process-based timeout
+            print(f"  Solving with timeout protection ({self.timeout_config.sat_solve_timeout}s)...")
+            
+            # Use process-based SAT solver for timeout protection
+            sat_result = self.process_sat_solver.solve_single(
+                clauses=all_current_clauses,
+                problem_id=f"incremental_bandwidth_n{self.n}_k{K}",
+                timeout=self.timeout_config.sat_solve_timeout,
+                additional_data={'n': self.n, 'K': K, 'edges': len(self.edges), 'phase': 'incremental'}
+            )
+            
+            if sat_result.status == 'SAT':
                 optimal_k = K
-                print(f"K = {K} is SAT")
-            else:
-                print(f"K = {K} is UNSAT")
+                print(f"K = {K} is SAT (process-isolated)")
+                
+                # Extract solution for verification
+                model = sat_result.model
+                self.last_model = model  # Store for extraction later
+                
+                # Extract and update best solution
+                positions = self._extract_positions_from_model(model)
+                bandwidth, edge_distances = self._calculate_bandwidth(positions)
+                self._update_best_solution(K, model, positions, bandwidth)
+                
+                self.extract_and_verify_solution(model, K)
+                
+            elif sat_result.status == 'UNSAT':
+                print(f"K = {K} is UNSAT (process-isolated)")
                 print(f"Optimal bandwidth = {optimal_k}")
+                break
+                
+            elif sat_result.status == 'TIMEOUT':
+                print(f"K = {K} TIMEOUT after {sat_result.total_time:.1f}s (process-isolated)")
+                if sat_result.process_killed:
+                    print(f"  -> Process successfully killed using: {sat_result.kill_method}")
+                else:
+                    print(f"  -> WARNING: Process may still be running")
+                self.phase_timeouts_occurred.append(f"Incremental SAT solve K={K}: Process timeout after {sat_result.total_time:.1f}s")
+                print(f"Optimal bandwidth = {optimal_k} (stopped due to timeout)")
+                break
+                
+            else:
+                print(f"K = {K} ERROR: {sat_result.error_message} (process-isolated)")
+                self.phase_timeouts_occurred.append(f"Incremental SAT solve K={K}: Process error - {sat_result.error_message}")
+                print(f"Optimal bandwidth = {optimal_k} (stopped due to error)")
                 break
         
         print(f"Final optimal bandwidth = {optimal_k}")
