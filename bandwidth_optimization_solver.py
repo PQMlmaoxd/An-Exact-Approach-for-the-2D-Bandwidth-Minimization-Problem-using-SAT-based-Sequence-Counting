@@ -487,11 +487,21 @@ if __name__ == '__main__':
     """
     Command line usage: python bandwidth_optimization_solver.py [mtx_file] [solver]
     
+    Arguments:
+        mtx_file: Name of MTX file (searches in mtx/group 1/ and mtx/group 2/)
+        solver: SAT solver to use (glucose42 or cadical195, default: glucose42)
+    
     Examples:
         python bandwidth_optimization_solver.py 8.jgl009.mtx glucose42
-        python bandwidth_optimization_solver.py cage3.mtx cadical195
-        python bandwidth_optimization_solver.py complete_k4.mtx
+        python bandwidth_optimization_solver.py 1.ash85.mtx cadical195  
+        python bandwidth_optimization_solver.py 3.bcsstk01.mtx
         python bandwidth_optimization_solver.py  # Run test mode
+        
+    Available MTX files:
+        Group 1: 1.bcspwr01.mtx, 2.bcspwr02.mtx, 3.bcsstk01.mtx, 4.can___24.mtx,
+                 5.fidap005.mtx, 6.fidapm05.mtx, 7.ibm32.mtx, 8.jgl009.mtx, 
+                 9.jgl011.mtx, 10.lap_25.mtx, 11.pores_1.mtx, 12.rgg010.mtx
+        Group 2: 1.ash85.mtx
     """
     import sys
     
@@ -533,13 +543,39 @@ if __name__ == '__main__':
                 print("Searched in:")
                 for path in search_paths:
                     print(f"  - {path}")
+                print(f"\nAvailable files in mtx/group 1/:")
+                group1_path = "mtx/group 1"
+                if os.path.exists(group1_path):
+                    for file in sorted(os.listdir(group1_path)):
+                        if file.endswith('.mtx'):
+                            print(f"  - {file}")
+                
+                print(f"\nAvailable files in mtx/group 2/:")
+                group2_path = "mtx/group 2"
+                if os.path.exists(group2_path):
+                    for file in sorted(os.listdir(group2_path)):
+                        if file.endswith('.mtx'):
+                            print(f"  - {file}")
+                            
+                print(f"\nUsage examples:")
+                print(f"  python bandwidth_optimization_solver.py 8.jgl009.mtx glucose42")
+                print(f"  python bandwidth_optimization_solver.py 1.ash85.mtx cadical195")
+                print(f"  python bandwidth_optimization_solver.py 3.bcsstk01.mtx")
                 sys.exit(1)
             
             mtx_file = found_file
         
         # Parse MTX file
         def parse_mtx_file(filename):
-            """Parse MTX file and return n, edges"""
+            """
+            Parse MTX file and return n, edges
+            
+            Handles MatrixMarket format:
+            - Comments and metadata parsing
+            - Self-loop removal  
+            - Undirected graph processing only
+            - Error handling for malformed files
+            """
             print(f"Reading MTX file: {os.path.basename(filename)}")
             
             try:
@@ -556,7 +592,12 @@ if __name__ == '__main__':
             for line_num, line in enumerate(lines, 1):
                 line = line.strip()
                 
-                if not line or line.startswith('%'):
+                if not line:
+                    continue
+                    
+                # Handle comments and metadata
+                if line.startswith('%'):
+                    # Skip metadata - dataset is all undirected/unweighted
                     continue
                 
                 # Parse dimensions
@@ -567,10 +608,11 @@ if __name__ == '__main__':
                             rows, cols, nnz = map(int, parts[:3])
                             n = max(rows, cols)
                             print(f"Matrix: {rows}×{cols}, {nnz} entries")
-                            print(f"Graph: undirected, unweighted")
+                            print(f"Graph: undirected, unweighted (dataset standard)")
                             header_found = True
                             continue
                     except ValueError:
+                        print(f"Warning: bad header at line {line_num}: {line}")
                         continue
                 
                 # Parse edges
@@ -578,15 +620,19 @@ if __name__ == '__main__':
                     parts = line.split()
                     if len(parts) >= 2:
                         u, v = int(parts[0]), int(parts[1])
+                        # Ignore weights (parts[2]) - dataset is unweighted
                         
                         if u == v:  # skip self-loops
                             continue
                         
-                        # Convert to undirected edge
+                        # Always convert to undirected edge (sorted tuple)
                         edge = tuple(sorted([u, v]))
-                        edges_set.add(edge)
+                        
+                        if edge not in edges_set:
+                            edges_set.add(edge)
                             
                 except (ValueError, IndexError):
+                    print(f"Warning: bad edge at line {line_num}: {line}")
                     continue
             
             edges = list(edges_set)
@@ -637,5 +683,21 @@ if __name__ == '__main__':
         print("2D BANDWIDTH OPTIMIZATION SOLVER - TEST MODE")
         print("=" * 80)
         print("Usage: python bandwidth_optimization_solver.py [mtx_file] [solver]")
+        print()
+        print("Arguments:")
+        print("  mtx_file: Name of MTX file (searches in mtx/group 1/ and mtx/group 2/)")
+        print("  solver: SAT solver to use (glucose42 or cadical195, default: glucose42)")
+        print()
+        print("Examples:")
+        print("  python bandwidth_optimization_solver.py 8.jgl009.mtx glucose42")
+        print("  python bandwidth_optimization_solver.py 1.ash85.mtx cadical195")
+        print("  python bandwidth_optimization_solver.py 3.bcsstk01.mtx")
+        print()
+        print("Available MTX files:")
+        print("  Group 1: 1.bcspwr01.mtx, 2.bcspwr02.mtx, 3.bcsstk01.mtx, 4.can___24.mtx,")
+        print("           5.fidap005.mtx, 6.fidapm05.mtx, 7.ibm32.mtx, 8.jgl009.mtx,")
+        print("           9.jgl011.mtx, 10.lap_25.mtx, 11.pores_1.mtx, 12.rgg010.mtx")
+        print("  Group 2: 1.ash85.mtx")
+        print()
         print("Running built-in test cases...")
         test_bandwidth_solver()

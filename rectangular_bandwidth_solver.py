@@ -31,50 +31,84 @@ def parse_mtx_file(file_path):
     Parse MTX file format for adjacency matrix graphs
     Returns: (grid_rows, grid_cols, num_vertices, edges_list)
     
+    Handles MatrixMarket format:
+    - Comments and metadata parsing
+    - Self-loop removal  
+    - Undirected graph processing only
+    - Error handling for malformed files
+    
     Format interpretation:
     - Line: rows cols nnz  => Matrix dimensions: rows×cols 
     - Entries: (i,j) or (i,j,val) => Adjacency matrix entries
     - Self-loops are ignored, weights are ignored
     - Returns undirected graph edges only
     """
+    print(f"Reading MTX file: {os.path.basename(file_path)}")
+    
     edges = []
     edges_set = set()
     
-    with open(file_path, 'r') as f:
-        # Skip header comments
-        line = f.readline()
-        while line.startswith('%'):
-            line = f.readline()
+    try:
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print(f"File not found: {file_path}")
+        return None, None, None, None
+    
+    header_found = False
+    matrix_rows = matrix_cols = nnz = 0
+    
+    for line_num, line in enumerate(lines, 1):
+        line = line.strip()
         
-        # Read dimensions: rows cols nnz
-        parts = line.strip().split()
-        matrix_rows, matrix_cols, nnz = int(parts[0]), int(parts[1]), int(parts[2])
+        if not line:
+            continue
+            
+        # Handle comments and metadata
+        if line.startswith('%'):
+            # Skip metadata - dataset is all undirected/unweighted
+            continue
         
-        print(f"MTX file: {matrix_rows}×{matrix_cols} matrix, {nnz} entries")
-        
-        # Parse matrix entries as adjacency matrix
-        for _ in range(nnz):
-            line = f.readline().strip()
-            if line:
+        # Parse dimensions
+        if not header_found:
+            try:
                 parts = line.split()
-                i, j = int(parts[0]), int(parts[1])  # Vertex indices (1-indexed)
+                if len(parts) >= 3:
+                    matrix_rows, matrix_cols, nnz = int(parts[0]), int(parts[1]), int(parts[2])
+                    print(f"Matrix: {matrix_rows}×{matrix_cols}, {nnz} entries")
+                    print(f"Graph: undirected, unweighted (dataset standard)")
+                    header_found = True
+                    continue
+            except ValueError:
+                print(f"Warning: bad header at line {line_num}: {line}")
+                continue
+        
+        # Parse edges
+        try:
+            parts = line.split()
+            if len(parts) >= 2:
+                i, j = int(parts[0]), int(parts[1])
                 # Ignore weights (parts[2]) - dataset is unweighted
                 
                 # Skip self-loops
                 if i == j:
                     continue
                     
-                # Convert to undirected edge (sorted tuple)
+                # Always convert to undirected edge (sorted tuple)
                 edge = tuple(sorted([i, j]))
                 
                 if edge not in edges_set:
                     edges_set.add(edge)
                     edges.append(edge)
+                        
+        except (ValueError, IndexError):
+            print(f"Warning: bad edge at line {line_num}: {line}")
+            continue
     
     # Number of vertices is the maximum vertex index
     num_vertices = max(matrix_rows, matrix_cols) if edges else matrix_rows
     
-    print(f"Graph: {num_vertices} vertices, {len(edges)} edges (undirected, unweighted)")
+    print(f"Loaded: {num_vertices} vertices, {len(edges)} edges")
     return matrix_rows, matrix_cols, num_vertices, edges
 
 class RectangularBandwidthOptimizationSolver:
@@ -554,44 +588,224 @@ class RectangularBandwidthOptimizationSolver:
         
         return optimal_k
 
-def test_trec5():
-    """Test the rectangular solver on Trec5.mtx"""
-    print("=== TESTING TREC5.MTX ===")
+def test_rectangular_solver():
+    """Test the rectangular solver on some built-in examples"""
+    print("=== RECTANGULAR BANDWIDTH SOLVER TESTS ===")
     
-    # Parse Trec5.mtx
-    mtx_file = r"e:\2DBMP\An-Exact-Approach-for-the-2D-Bandwidth-Minimization-Problem-using-SAT-based-Sequence-Counting\mtx\Trec5.mtx"
+    # Test 1: Small rectangular example
+    print(f"\n" + "="*40)
+    print(f"Test 1: Small Rectangular Grid")
+    print(f"="*40)
     
-    try:
-        n_rows, n_cols, num_vertices, edges = parse_mtx_file(mtx_file)
-        print(f"Loaded Trec5: {n_rows}×{n_cols} grid with {num_vertices} vertices, {len(edges)} edges")
-        print(f"Edges: {edges}")
-        
-        print(f"\n" + "="*50)
-        print(f"Testing Trec5 on {n_rows}×{n_cols} grid")
-        print(f"="*50)
-        
-        try:
-            solver = RectangularBandwidthOptimizationSolver(
-                num_vertices, n_rows, n_cols, 'glucose42'
-            )
-            solver.set_graph_edges(edges)
-            solver.create_position_variables()
-            solver.create_distance_variables()
-            
-            # Limit search range for efficiency
-            max_k = min(20, (n_rows - 1) + (n_cols - 1))
-            optimal = solver.solve_bandwidth_optimization(start_k=1, end_k=max_k)
-            
-            print(f"Result for Trec5 on {n_rows}×{n_cols}: {optimal}")
-            return optimal
-            
-        except Exception as e:
-            print(f"Error with {n_rows}×{n_cols} grid: {e}")
-            return None
-        
-    except Exception as e:
-        print(f"Error loading Trec5.mtx: {e}")
-        return None
+    n_vertices = 4
+    edges = [(1, 2), (2, 3), (3, 4), (1, 4)]  # Rectangle graph
+    n_rows, n_cols = 2, 2  # 2x2 grid
+    
+    solver1 = RectangularBandwidthOptimizationSolver(n_vertices, n_rows, n_cols, 'glucose42')
+    solver1.set_graph_edges(edges)
+    solver1.create_position_variables()
+    solver1.create_distance_variables()
+    
+    optimal1 = solver1.solve_bandwidth_optimization(start_k=1, end_k=4)
+    print(f"Small rectangular result: {optimal1}")
+    
+    # Test 2: Path on non-square grid
+    print(f"\n" + "="*40)
+    print(f"Test 2: Path on 3x2 Grid")
+    print(f"="*40)
+    
+    n_vertices2 = 5
+    edges2 = [(1, 2), (2, 3), (3, 4), (4, 5)]  # Path
+    n_rows2, n_cols2 = 3, 2  # 3x2 grid
+    
+    solver2 = RectangularBandwidthOptimizationSolver(n_vertices2, n_rows2, n_cols2, 'cadical195')
+    solver2.set_graph_edges(edges2)
+    solver2.create_position_variables()
+    solver2.create_distance_variables()
+    
+    optimal2 = solver2.solve_bandwidth_optimization(start_k=1, end_k=6)
+    print(f"Path on 3x2 grid result: {optimal2}")
+    
+    # Summary
+    print(f"\n" + "="*60)
+    print(f"RECTANGULAR SOLVER RESULTS SUMMARY")
+    print(f"="*60)
+    print(f"Small rectangular (2x2): {optimal1}")
+    print(f"Path on 3x2 grid: {optimal2}")
+    print(f"="*60)
 
 if __name__ == '__main__':
-    test_trec5()
+    """
+    Command line usage: python rectangular_bandwidth_solver.py [mtx_file] [n_rows] [n_cols] [solver]
+    
+    Arguments:
+        mtx_file: Name of MTX file (searches in mtx/group 1/ and mtx/group 2/)
+        n_rows: Number of grid rows (height)
+        n_cols: Number of grid columns (width)
+        solver: SAT solver to use (glucose42 or cadical195, default: glucose42)
+    
+    Examples:
+        python rectangular_bandwidth_solver.py 8.jgl009.mtx 3 3 glucose42
+        python rectangular_bandwidth_solver.py 1.ash85.mtx 4 3 cadical195  
+        python rectangular_bandwidth_solver.py 3.bcsstk01.mtx 2 5
+        python rectangular_bandwidth_solver.py  # Run test mode
+        
+    Available MTX files:
+        Group 1: 1.bcspwr01.mtx, 2.bcspwr02.mtx, 3.bcsstk01.mtx, 4.can___24.mtx,
+                 5.fidap005.mtx, 6.fidapm05.mtx, 7.ibm32.mtx, 8.jgl009.mtx, 
+                 9.jgl011.mtx, 10.lap_25.mtx, 11.pores_1.mtx, 12.rgg010.mtx
+        Group 2: 1.ash85.mtx
+    """
+    import sys
+    
+    # Check if MTX file provided
+    if len(sys.argv) >= 4:  # Need at least mtx_file, n_rows, n_cols
+        # MTX file mode with rectangular grid
+        mtx_file = sys.argv[1]
+        n_rows = int(sys.argv[2])
+        n_cols = int(sys.argv[3])
+        solver_type = sys.argv[4] if len(sys.argv) >= 5 else 'glucose42'
+        
+        print("=" * 80)
+        print("RECTANGULAR 2D BANDWIDTH OPTIMIZATION SOLVER")
+        print("=" * 80)
+        print(f"File: {mtx_file}")
+        print(f"Grid: {n_rows}×{n_cols}")
+        print(f"Solver: {solver_type.upper()}")
+        
+        # Search for file in common locations
+        if not os.path.exists(mtx_file):
+            search_paths = [
+                mtx_file,
+                f"mtx/{mtx_file}",
+                f"mtx/group 1/{mtx_file}",
+                f"mtx/group 2/{mtx_file}",
+                f"sample_mtx_datasets/{mtx_file}",
+                f"mtx/{mtx_file}.mtx",
+                f"mtx/group 1/{mtx_file}.mtx", 
+                f"mtx/group 2/{mtx_file}.mtx",
+                f"sample_mtx_datasets/{mtx_file}.mtx"
+            ]
+            
+            found_file = None
+            for path in search_paths:
+                if os.path.exists(path):
+                    found_file = path
+                    print(f"Found file at: {path}")
+                    break
+            
+            if found_file is None:
+                print(f"Error: File '{mtx_file}' not found")
+                print("Searched in:")
+                for path in search_paths:
+                    print(f"  - {path}")
+                print(f"\nAvailable files in mtx/group 1/:")
+                group1_path = "mtx/group 1"
+                if os.path.exists(group1_path):
+                    for file in sorted(os.listdir(group1_path)):
+                        if file.endswith('.mtx'):
+                            print(f"  - {file}")
+                
+                print(f"\nAvailable files in mtx/group 2/:")
+                group2_path = "mtx/group 2"
+                if os.path.exists(group2_path):
+                    for file in sorted(os.listdir(group2_path)):
+                        if file.endswith('.mtx'):
+                            print(f"  - {file}")
+                            
+                print(f"\nUsage examples:")
+                print(f"  python rectangular_bandwidth_solver.py 8.jgl009.mtx 3 3 glucose42")
+                print(f"  python rectangular_bandwidth_solver.py 1.ash85.mtx 4 3 cadical195")
+                print(f"  python rectangular_bandwidth_solver.py 3.bcsstk01.mtx 2 5")
+                sys.exit(1)
+            
+            mtx_file = found_file
+        
+        # Parse MTX file
+        matrix_rows, matrix_cols, num_vertices, edges = parse_mtx_file(mtx_file)
+        if matrix_rows is None or matrix_cols is None or num_vertices is None or edges is None:
+            print("Failed to parse MTX file")
+            sys.exit(1)
+        
+        # Validate grid dimensions
+        if num_vertices > n_rows * n_cols:
+            print(f"Error: Cannot place {num_vertices} vertices on {n_rows}×{n_cols} grid")
+            print(f"Grid has only {n_rows * n_cols} positions")
+            
+            # Suggest minimum grid sizes
+            import math
+            min_square = int(math.ceil(math.sqrt(num_vertices)))
+            print(f"\nSuggested grid sizes:")
+            print(f"  Minimum square: {min_square}×{min_square}")
+            print(f"  Single row: {num_vertices}×1")
+            print(f"  Single column: 1×{num_vertices}")
+            
+            # Show rectangular options
+            for rows in range(2, min(num_vertices + 1, 10)):
+                cols = (num_vertices + rows - 1) // rows
+                if rows * cols >= num_vertices:
+                    print(f"  Rectangular: {rows}×{cols}")
+            sys.exit(1)
+        
+        # Solve rectangular bandwidth problem
+        print(f"\nSolving rectangular 2D bandwidth minimization...")
+        print(f"Problem: {num_vertices} vertices on {n_rows}×{n_cols} grid")
+        print(f"Grid utilization: {(num_vertices / (n_rows * n_cols)) * 100:.1f}%")
+        print(f"Using: {solver_type.upper()}")
+        
+        solver = RectangularBandwidthOptimizationSolver(num_vertices, n_rows, n_cols, solver_type)
+        solver.set_graph_edges(edges)
+        solver.create_position_variables()
+        solver.create_distance_variables()
+        
+        start_time = time.time()
+        optimal_bandwidth = solver.solve_bandwidth_optimization()
+        solve_time = time.time() - start_time
+        
+        # Results
+        print(f"\n" + "="*60)
+        print(f"FINAL RESULTS")
+        print(f"="*60)
+        
+        if optimal_bandwidth is not None:
+            max_possible = (n_rows - 1) + (n_cols - 1)
+            print(f"✓ Optimal bandwidth: {optimal_bandwidth}")
+            print(f"✓ Solve time: {solve_time:.2f}s")
+            print(f"✓ Graph: {num_vertices} vertices, {len(edges)} edges")
+            print(f"✓ Grid: {n_rows}×{n_cols} ({n_rows * n_cols} positions)")
+            print(f"✓ Max possible distance: {max_possible}")
+            print(f"✓ Solver: {solver_type.upper()}")
+            print(f"✓ Status: SUCCESS")
+        else:
+            print(f"✗ No solution found")
+            print(f"✗ Solve time: {solve_time:.2f}s")
+            print(f"✗ Status: FAILED")
+        
+        print(f"="*60)
+        
+    else:
+        # Test mode - run built-in test cases
+        print("=" * 80)
+        print("RECTANGULAR 2D BANDWIDTH OPTIMIZATION SOLVER - TEST MODE")
+        print("=" * 80)
+        print("Usage: python rectangular_bandwidth_solver.py [mtx_file] [n_rows] [n_cols] [solver]")
+        print()
+        print("Arguments:")
+        print("  mtx_file: Name of MTX file (searches in mtx/group 1/ and mtx/group 2/)")
+        print("  n_rows: Number of grid rows (height)")
+        print("  n_cols: Number of grid columns (width)")
+        print("  solver: SAT solver to use (glucose42 or cadical195, default: glucose42)")
+        print()
+        print("Examples:")
+        print("  python rectangular_bandwidth_solver.py 8.jgl009.mtx 3 3 glucose42")
+        print("  python rectangular_bandwidth_solver.py 1.ash85.mtx 4 3 cadical195")
+        print("  python rectangular_bandwidth_solver.py 3.bcsstk01.mtx 2 5")
+        print()
+        print("Available MTX files:")
+        print("  Group 1: 1.bcspwr01.mtx, 2.bcspwr02.mtx, 3.bcsstk01.mtx, 4.can___24.mtx,")
+        print("           5.fidap005.mtx, 6.fidapm05.mtx, 7.ibm32.mtx, 8.jgl009.mtx,")
+        print("           9.jgl011.mtx, 10.lap_25.mtx, 11.pores_1.mtx, 12.rgg010.mtx")
+        print("  Group 2: 1.ash85.mtx")
+        print()
+        print("Running built-in test cases...")
+        test_rectangular_solver()
