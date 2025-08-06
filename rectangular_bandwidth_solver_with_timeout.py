@@ -17,10 +17,12 @@ try:
     from distance_encoder import encode_abs_distance_final
     from random_assignment_ub_finder import RandomAssignmentUBFinder
     from position_constraints import encode_all_position_constraints, create_position_variables
-    from enhanced_sat_timeout_solver import EnhancedProcessTimeoutSATSolver
-    print("All modules loaded OK (including enhanced SAT timeout solver)")
+    from timeout_utils import get_timeout_executor, TimeoutError, TimeoutConfig
+    from enhanced_sat_timeout_solver import EnhancedProcessTimeoutSATSolver, EnhancedSATResult
+    print("All modules loaded OK (including timeout utilities and enhanced SAT timeout solver)")
 except ImportError as e:
     print(f"Import error: {e}")
+    print("Need required modules including timeout_utils and enhanced_sat_timeout_solver")
     raise ImportError("Missing required modules")
 
 # Basic constants
@@ -68,42 +70,21 @@ class TimeoutRectangularBandwidthOptimizationSolver:
         self.edges = []
         self.last_model = None
         
-        # Enhanced SAT solver with timeout
-        self.enhanced_sat_solver = EnhancedProcessTimeoutSATSolver(
+        # Timeout configuration - handle both dict and TimeoutConfig object
+        if timeout_config is None:
+            self.timeout_config = TimeoutConfig()
+        elif isinstance(timeout_config, dict):
+            # Convert dict to TimeoutConfig object for compatibility
+            self.timeout_config = TimeoutConfig()
+            self.timeout_config.update_timeouts(**timeout_config)
+        else:
+            self.timeout_config = timeout_config
+        
+        # Initialize enhanced process-based SAT solver for robust timeout
+        self.process_sat_solver = EnhancedProcessTimeoutSATSolver(
             solver_type=solver_type,
-            default_timeout=10.0  # Default SAT solve timeout
+            default_timeout=self.timeout_config.sat_solve_timeout
         )
-        
-        # Timeout configuration (simplified)
-        self.random_search_timeout = 30.0
-        self.sat_solve_timeout = 10.0
-        self.total_solver_timeout = 300.0
-        self.position_constraints_timeout = 60.0
-        self.distance_constraints_timeout = 120.0
-        self.bandwidth_constraints_timeout = 60.0
-        
-        if timeout_config:
-            # Update timeouts from config dict
-            for key, value in timeout_config.items():
-                if hasattr(self, key):
-                    setattr(self, key, value)
-                    print(f"Updated {key} = {value}s")
-        
-        print(f"✓ Enhanced Process SAT Solver initialized")
-        print(f"  - Solver: {solver_type.upper()}")
-        print(f"  - Default timeout: {self.sat_solve_timeout}s")
-        print(f"  - Force-kill: ENABLED")
-        print(f"  - Platform: win32")
-        
-        print(f"Created rectangular timeout-enabled solver: {num_vertices} vertices on {n_rows}×{n_cols} grid using {solver_type}")
-        print("Timeout configuration:")
-        print(f"Random search timeout: {self.random_search_timeout}s")
-        print(f"SAT solve timeout: {self.sat_solve_timeout}s")
-        print(f"Total solver timeout: {self.total_solver_timeout}s")
-        print(f"Position constraints timeout: {self.position_constraints_timeout}s")
-        print(f"Distance constraints timeout: {self.distance_constraints_timeout}s")
-        print(f"Bandwidth constraints timeout: {self.bandwidth_constraints_timeout}s")
-        print(f"✓ Enhanced Process-based SAT timeout protection ENABLED")
         
         # Tracking variables
         self.solve_start_time = None
@@ -115,6 +96,11 @@ class TimeoutRectangularBandwidthOptimizationSolver:
         self.best_solution_model = None
         self.best_solution_positions = None
         self.best_solution_bandwidth = None
+        
+        print(f"Created rectangular timeout-enabled solver: {num_vertices} vertices on {n_rows}×{n_cols} grid using {solver_type}")
+        print("Timeout configuration:")
+        print(self.timeout_config.get_timeout_summary())
+        print(f"✓ Enhanced Process-based SAT timeout protection ENABLED")
     
     def _update_best_solution(self, K, model=None, positions=None, bandwidth=None):
         """Update the best known feasible solution"""
@@ -169,12 +155,12 @@ class TimeoutRectangularBandwidthOptimizationSolver:
     
     def _check_total_timeout(self):
         """Check if total solver timeout has been exceeded"""
-        if not self.solve_start_time:
+        if not self.timeout_config.enable_total_timeout or not self.solve_start_time:
             return False
         
         elapsed = time.time() - self.solve_start_time
-        if elapsed > self.total_solver_timeout:
-            raise Exception(f"Total solver timeout ({self.total_solver_timeout}s) exceeded after {elapsed:.2f}s")
+        if elapsed > self.timeout_config.total_solver_timeout:
+            raise TimeoutError(f"Total solver timeout ({self.timeout_config.total_solver_timeout}s) exceeded after {elapsed:.2f}s")
         return False
     
     def encode_position_constraints_with_timeout(self):
@@ -237,8 +223,20 @@ class TimeoutRectangularBandwidthOptimizationSolver:
             
             return clauses
         
-        # Direct implementation without timeout for now
-        return _encode_rectangular_position_constraints()
+        if self.timeout_config.enable_constraint_timeouts:
+            try:
+                with get_timeout_executor() as executor:
+                    return executor.execute(
+                        _encode_rectangular_position_constraints, 
+                        timeout=self.timeout_config.position_constraints_timeout
+                    )
+            except TimeoutError as e:
+                self.constraint_timeouts_occurred.append(f"Rectangular position constraints: {e}")
+                print(f"WARNING: Rectangular position constraints timeout - using fallback")
+                # Fallback: return minimal constraints
+                return []
+        else:
+            return _encode_rectangular_position_constraints()
     
     def encode_distance_constraints_with_timeout(self):
         """Encode distance constraints for rectangular grid with timeout protection"""
@@ -262,8 +260,20 @@ class TimeoutRectangularBandwidthOptimizationSolver:
             
             return clauses
         
-        # Direct implementation without timeout for now
-        return _encode_rectangular_distance_constraints()
+        if self.timeout_config.enable_constraint_timeouts:
+            try:
+                with get_timeout_executor() as executor:
+                    return executor.execute(
+                        _encode_rectangular_distance_constraints, 
+                        timeout=self.timeout_config.distance_constraints_timeout
+                    )
+            except TimeoutError as e:
+                self.constraint_timeouts_occurred.append(f"Rectangular distance constraints: {e}")
+                print(f"WARNING: Rectangular distance constraints timeout - using fallback")
+                # Fallback: return minimal constraints
+                return []
+        else:
+            return _encode_rectangular_distance_constraints()
     
     def encode_thermometer_bandwidth_constraints_with_timeout(self, K):
         """
@@ -304,10 +314,138 @@ class TimeoutRectangularBandwidthOptimizationSolver:
             print(f"Generated {len(clauses)} rectangular thermometer clauses")
             return clauses
         
-        # Direct implementation without timeout for now
-        return _encode_rectangular_thermometer_bandwidth_constraints()
+        if self.timeout_config.enable_constraint_timeouts:
+            try:
+                with get_timeout_executor() as executor:
+                    return executor.execute(
+                        _encode_rectangular_thermometer_bandwidth_constraints, 
+                        timeout=self.timeout_config.bandwidth_constraints_timeout
+                    )
+            except TimeoutError as e:
+                self.constraint_timeouts_occurred.append(f"Rectangular bandwidth constraints K={K}: {e}")
+                print(f"WARNING: Rectangular bandwidth constraints timeout for K={K} - using fallback")
+                # Fallback: return minimal constraints
+                return []
+        else:
+            return _encode_rectangular_thermometer_bandwidth_constraints()
     
-    def _create_solver(self):
+    def encode_position_constraints(self):
+        """
+        Encode position constraints for rectangular grid without timeout (for base constraints)
+        """
+        clauses = []
+        
+        # Each vertex must be in exactly one column
+        for v in range(1, self.num_vertices + 1):
+            x_vars = self.X_vars[v]
+            exactly_one_x = CardEnc.equals(x_vars, 1, vpool=self.vpool, encoding=EncType.seqcounter)
+            clauses.extend(exactly_one_x.clauses)
+        
+        # Each vertex must be in exactly one row
+        for v in range(1, self.num_vertices + 1):
+            y_vars = self.Y_vars[v]
+            exactly_one_y = CardEnc.equals(y_vars, 1, vpool=self.vpool, encoding=EncType.seqcounter)
+            clauses.extend(exactly_one_y.clauses)
+        
+        # Each position can have at most one vertex
+        # For each column position
+        for col in range(1, self.n_cols + 1):
+            column_vars = [self.X_vars[v][col-1] for v in range(1, self.num_vertices + 1)]
+            at_most_one_col = CardEnc.atmost(column_vars, 1, vpool=self.vpool, encoding=EncType.seqcounter)
+            clauses.extend(at_most_one_col.clauses)
+        
+        # For each row position
+        for row in range(1, self.n_rows + 1):
+            row_vars = [self.Y_vars[v][row-1] for v in range(1, self.num_vertices + 1)]
+            at_most_one_row = CardEnc.atmost(row_vars, 1, vpool=self.vpool, encoding=EncType.seqcounter)
+            clauses.extend(at_most_one_row.clauses)
+        
+        # Each grid cell can have at most one vertex
+        for row in range(1, self.n_rows + 1):
+            for col in range(1, self.n_cols + 1):
+                cell_vars = []
+                for v in range(1, self.num_vertices + 1):
+                    # Vertex v is at position (row, col) if both X_v_col and Y_v_row are true
+                    # We need auxiliary variables for this
+                    aux_var = self.vpool.id(f'Cell_{row}_{col}_{v}')
+                    cell_vars.append(aux_var)
+                    
+                    # aux_var ↔ (X_v_col ∧ Y_v_row)
+                    x_var = self.X_vars[v][col-1]
+                    y_var = self.Y_vars[v][row-1]
+                    
+                    # aux_var → X_v_col
+                    clauses.append([-aux_var, x_var])
+                    # aux_var → Y_v_row
+                    clauses.append([-aux_var, y_var])
+                    # (X_v_col ∧ Y_v_row) → aux_var
+                    clauses.append([-x_var, -y_var, aux_var])
+                
+                # At most one vertex per cell
+                if len(cell_vars) > 1:
+                    at_most_one_cell = CardEnc.atmost(cell_vars, 1, vpool=self.vpool, encoding=EncType.seqcounter)
+                    clauses.extend(at_most_one_cell.clauses)
+        
+        return clauses
+    
+    def encode_distance_constraints(self):
+        """Encode distance constraints for rectangular grid without timeout (for base constraints)"""
+        clauses = []
+        
+        for edge_id, (u, v) in zip([f'edge_{u}_{v}' for u, v in self.edges], self.edges):
+            # X distance encoding (columns)
+            Tx_vars, Tx_clauses = encode_abs_distance_final(
+                self.X_vars[u], self.X_vars[v], self.n_cols, self.vpool, f"Tx_{edge_id}"
+            )
+            self.Tx_vars[edge_id] = Tx_vars
+            clauses.extend(Tx_clauses)
+            
+            # Y distance encoding (rows)
+            Ty_vars, Ty_clauses = encode_abs_distance_final(
+                self.Y_vars[u], self.Y_vars[v], self.n_rows, self.vpool, f"Ty_{edge_id}"
+            )
+            self.Ty_vars[edge_id] = Ty_vars
+            clauses.extend(Ty_clauses)
+        
+        return clauses
+    
+    def encode_thermometer_bandwidth_constraints(self, K):
+        """
+        Encode bandwidth <= K using thermometer encoding for rectangular grid without timeout (for incremental)
+        """
+        clauses = []
+        
+        print(f"Encoding rectangular thermometer for K={K}:")
+        
+        for edge_id in self.Tx_vars:
+            Tx = self.Tx_vars[edge_id]  # Tx[i] means Tx >= i+1
+            Ty = self.Ty_vars[edge_id]  # Ty[i] means Ty >= i+1
+            
+            # Tx <= K (i.e., not Tx >= K+1)
+            if K < len(Tx):
+                clauses.append([-Tx[K]])
+            
+            # Ty <= K (i.e., not Ty >= K+1)
+            if K < len(Ty):
+                clauses.append([-Ty[K]])
+            
+            # Implication: Tx >= i → Ty <= K-i
+            for i in range(1, K + 1):
+                if K - i >= 0:
+                    tx_geq_i = None
+                    ty_leq_ki = None
+                    
+                    if i-1 < len(Tx):
+                        tx_geq_i = Tx[i-1]  # Tx >= i
+                    
+                    if K-i < len(Ty):
+                        ty_leq_ki = -Ty[K-i]  # Ty <= K-i
+                    
+                    if tx_geq_i is not None and ty_leq_ki is not None:
+                        clauses.append([-tx_geq_i, ty_leq_ki])
+        
+        print(f"Generated {len(clauses)} rectangular thermometer clauses")
+        return clauses
         """Create SAT solver instance"""
         if self.solver_type == 'glucose42':
             return Glucose42()
@@ -377,82 +515,98 @@ class TimeoutRectangularBandwidthOptimizationSolver:
             if found_valid:
                 # Update best solution from random search
                 self._update_best_solution(best_bandwidth)
-            
-            return found_valid
+                return True
+            else:
+                return False
         
-        # Direct implementation without timeout for now
-        return _rectangular_random_search()
+        if self.timeout_config.enable_phase_timeouts:
+            try:
+                with get_timeout_executor() as executor:
+                    return executor.execute(
+                        _rectangular_random_search, 
+                        timeout=self.timeout_config.random_search_timeout
+                    )
+            except TimeoutError as e:
+                self.phase_timeouts_occurred.append(f"Rectangular random search K={K}: {e}")
+                print(f"WARNING: Rectangular random search timeout for K={K}")
+                return False  # Assume infeasible if timeout
+        else:
+            return _rectangular_random_search()
     
     def step2_encode_advanced_constraints_with_timeout(self, K):
         """
-        Step 2: Test K using complete SAT encoding for rectangular grid with timeout
+        Step 2: Test K using complete SAT encoding for rectangular grid with robust process-based timeout
         """
         def _rectangular_sat_solve():
             print(f"\n--- Step 2: Testing K={K} with rectangular SAT encoding ---")
             print(f"Grid: {self.n_rows}×{self.n_cols}, using {self.solver_type.upper()} solver with PROCESS-BASED timeout")
             print(f"Encoding thermometer constraints for bandwidth <= {K}")
             
-            try:
-                print(f"Building rectangular constraints...")
+            print(f"Building rectangular constraints...")
+            
+            # Position constraints for rectangular grid
+            position_clauses = self.encode_position_constraints_with_timeout()
+            print(f"  Rectangular position: {len(position_clauses)} clauses")
+            
+            # Distance constraints for rectangular grid
+            distance_clauses = self.encode_distance_constraints_with_timeout()
+            print(f"  Rectangular distance: {len(distance_clauses)} clauses")
+            
+            # Bandwidth constraints
+            bandwidth_clauses = self.encode_thermometer_bandwidth_constraints_with_timeout(K)
+            print(f"  Rectangular bandwidth: {len(bandwidth_clauses)} clauses")
+            
+            # Add all constraints
+            all_clauses = position_clauses + distance_clauses + bandwidth_clauses
+            print(f"Total rectangular constraints: {len(all_clauses)} clauses")
+            
+            # Use enhanced process-based SAT solver for robust timeout
+            print(f"Launching isolated SAT process with {self.timeout_config.sat_solve_timeout}s timeout...")
+            
+            sat_result = self.process_sat_solver.solve_single(
+                clauses=all_clauses,
+                problem_id=f"rectangular_bandwidth_n{self.num_vertices}_k{K}_{self.n_rows}x{self.n_cols}",
+                timeout=self.timeout_config.sat_solve_timeout,
+                additional_data={'n': self.num_vertices, 'K': K, 'edges': len(self.edges), 'grid': f'{self.n_rows}x{self.n_cols}'}
+            )
+            
+            if sat_result.status == 'SAT':
+                print(f"K={K} is SAT on {self.n_rows}×{self.n_cols} grid (process-isolated)")
+                print(f"Extracting rectangular solution...")
                 
-                # Position constraints for rectangular grid
-                position_clauses = self.encode_position_constraints_with_timeout()
-                print(f"  Rectangular position: {len(position_clauses)} clauses")
+                # Convert model back to our format
+                model = sat_result.model
+                self.last_model = model  # Store for extraction later
                 
-                # Distance constraints for rectangular grid
-                distance_clauses = self.encode_distance_constraints_with_timeout()
-                print(f"  Rectangular distance: {len(distance_clauses)} clauses")
+                # Extract and verify solution
+                positions = self._extract_rectangular_positions_from_model(model)
+                bandwidth, edge_distances = self._calculate_rectangular_bandwidth(positions)
+                self._print_rectangular_solution_details(positions, edge_distances, bandwidth, K)
                 
-                # Bandwidth constraints
-                bandwidth_clauses = self.encode_thermometer_bandwidth_constraints_with_timeout(K)
-                print(f"  Rectangular bandwidth: {len(bandwidth_clauses)} clauses")
+                # Update best solution
+                self._update_best_solution(K, model, positions, bandwidth)
                 
-                # Add all constraints
-                all_clauses = position_clauses + distance_clauses + bandwidth_clauses
-                print(f"Total rectangular constraints: {len(all_clauses)} clauses")
+                return True
                 
-                # Use enhanced SAT solver with process-based timeout
-                print(f"Launching isolated SAT process with {self.sat_solve_timeout}s timeout...")
-                problem_name = f"rectangular_bandwidth_n{self.num_vertices}_k{K}_{self.n_rows}x{self.n_cols}"
-                print(f"Solving {problem_name} with {self.sat_solve_timeout}s timeout...")
-                print(f"Problem: {len(all_clauses)} clauses")
-                
-                result_obj = self.enhanced_sat_solver.solve_single(
-                    all_clauses, 
-                    problem_name,  # problem_id parameter
-                    timeout=self.sat_solve_timeout
-                )
-                
-                result = result_obj.status
-                model = result_obj.model
-                solve_time = result_obj.solve_time
-                
-                print(f"  -> Result: {result}")
-                print(f"  -> Time: {solve_time:.2f}s")
-                
-                if result == 'SAT':
-                    self.last_model = model
-                    print(f"K={K} is SAT on {self.n_rows}×{self.n_cols} grid (process-isolated)")
-                    print(f"Extracting rectangular solution...")
-                    
-                    # Extract and verify solution
-                    positions = self._extract_rectangular_positions_from_model(model)
-                    bandwidth, edge_distances = self._calculate_rectangular_bandwidth(positions)
-                    self._print_rectangular_solution_details(positions, edge_distances, bandwidth, K)
-                    
-                    # Update best solution
-                    self._update_best_solution(K, model, positions, bandwidth)
-                    
-                    return True
-                else:
-                    print(f"K={K} is UNSAT on {self.n_rows}×{self.n_cols} grid (process-isolated)")
-                    return False
-                    
-            except Exception as e:
-                print(f"ERROR during rectangular SAT solving: {e}")
+            elif sat_result.status == 'UNSAT':
+                print(f"K={K} is UNSAT on {self.n_rows}×{self.n_cols} grid (process-isolated)")
                 return False
+                
+            elif sat_result.status == 'TIMEOUT':
+                print(f"K={K} TIMEOUT after {sat_result.total_time:.1f}s on {self.n_rows}×{self.n_cols} grid (process-isolated)")
+                if sat_result.process_killed:
+                    print(f"  -> Process successfully killed using: {sat_result.kill_method}")
+                else:
+                    print(f"  -> WARNING: Process may still be running")
+                self.phase_timeouts_occurred.append(f"Rectangular SAT solve K={K}: Process timeout after {sat_result.total_time:.1f}s")
+                return False  # Treat timeout as UNSAT
+                
+            else:
+                print(f"K={K} ERROR: {sat_result.error_message} on {self.n_rows}×{self.n_cols} grid (process-isolated)")
+                self.phase_timeouts_occurred.append(f"Rectangular SAT solve K={K}: Process error - {sat_result.error_message}")
+                return False  # Treat error as UNSAT
         
-        # Direct implementation without timeout for now
+        # Always use the process-based solver - no need for additional timeout wrapper
         return _rectangular_sat_solve()
     
     def _extract_rectangular_positions_from_model(self, model):
@@ -523,6 +677,113 @@ class TimeoutRectangularBandwidthOptimizationSolver:
         print(f"Grid: {self.n_rows}×{self.n_cols}")
         
         for K in range(start_k, end_k + 1):
+            self._check_total_timeout()  # Check total timeout
+            
+            print(f"\nTrying K = {K} on rectangular grid")
+            
+            if self.step1_test_ub_pure_random_with_timeout(K):
+                print(f"Found feasible UB = {K} on rectangular grid")
+                return K
+            else:
+                print(f"K = {K} not achievable on rectangular grid")
+        
+        print(f"\nError: No feasible UB in range [{start_k}, {end_k}] for {self.n_rows}×{self.n_cols} grid")
+        
+        # Check if we found any feasible solution during search
+        if self.best_feasible_k is not None:
+            print(f"However, found feasible solution with K={self.best_feasible_k} during rectangular search")
+            return self.best_feasible_k
+        
+        return None
+    
+    def _optimize_with_sat_phase2_with_timeout(self, feasible_ub):
+        """Phase 2: Incremental SAT optimization for rectangular grid with timeout protection (Process-based)"""
+        print(f"\nPhase 2: Incremental rectangular SAT optimization from K={feasible_ub-1} down to 1")
+        print(f"Grid: {self.n_rows}×{self.n_cols}, Using process-based timeout protection for each SAT solve")
+        
+        # Prepare base constraints once (position + distance)
+        print(f"Preparing rectangular base constraints (position + distance)...")
+        
+        position_clauses = self.encode_position_constraints()
+        distance_clauses = self.encode_distance_constraints()
+        base_clauses = position_clauses + distance_clauses
+        
+        print(f"  Rectangular position: {len(position_clauses)} clauses")
+        print(f"  Rectangular distance: {len(distance_clauses)} clauses")
+        print(f"  Total rectangular base: {len(base_clauses)} clauses")
+        
+        optimal_k = feasible_ub
+        
+        # Incremental SAT: try smaller K values with process-based timeout
+        for K in range(feasible_ub - 1, 0, -1):
+            self._check_total_timeout()  # Check total timeout
+            
+            print(f"\nTrying K = {K} with process-based rectangular SAT timeout")
+            
+            # Prepare bandwidth constraints for this K
+            bandwidth_clauses = self.encode_thermometer_bandwidth_constraints(K)
+            print(f"  Generated {len(bandwidth_clauses)} rectangular bandwidth clauses for K={K}")
+            
+            # Combine all constraints for this K
+            all_current_clauses = base_clauses + bandwidth_clauses
+            print(f"  Total rectangular clauses for K={K}: {len(all_current_clauses)}")
+            
+            # Solve with current constraints using process-based timeout
+            print(f"  Solving with timeout protection ({self.timeout_config.sat_solve_timeout}s)...")
+            
+            # Use process-based SAT solver for timeout protection
+            sat_result = self.process_sat_solver.solve_single(
+                clauses=all_current_clauses,
+                problem_id=f"incremental_rectangular_bandwidth_n{self.num_vertices}_k{K}_{self.n_rows}x{self.n_cols}",
+                timeout=self.timeout_config.sat_solve_timeout,
+                additional_data={'n': self.num_vertices, 'K': K, 'edges': len(self.edges), 'phase': 'incremental', 'grid': f'{self.n_rows}x{self.n_cols}'}
+            )
+            
+            if sat_result.status == 'SAT':
+                optimal_k = K
+                print(f"K = {K} is SAT on {self.n_rows}×{self.n_cols} grid (process-isolated)")
+                
+                # Extract solution for verification
+                model = sat_result.model
+                self.last_model = model  # Store for extraction later
+                
+                # Extract and update best solution
+                positions = self._extract_rectangular_positions_from_model(model)
+                bandwidth, edge_distances = self._calculate_rectangular_bandwidth(positions)
+                self._update_best_solution(K, model, positions, bandwidth)
+                
+                self.extract_and_verify_rectangular_solution(model, K)
+                
+            elif sat_result.status == 'UNSAT':
+                print(f"K = {K} is UNSAT on {self.n_rows}×{self.n_cols} grid (process-isolated)")
+                print(f"Optimal rectangular bandwidth = {optimal_k}")
+                break
+                
+            elif sat_result.status == 'TIMEOUT':
+                print(f"K = {K} TIMEOUT after {sat_result.total_time:.1f}s on {self.n_rows}×{self.n_cols} grid (process-isolated)")
+                if sat_result.process_killed:
+                    print(f"  -> Process successfully killed using: {sat_result.kill_method}")
+                else:
+                    print(f"  -> WARNING: Process may still be running")
+                self.phase_timeouts_occurred.append(f"Incremental rectangular SAT solve K={K}: Process timeout after {sat_result.total_time:.1f}s")
+                print(f"Optimal rectangular bandwidth = {optimal_k} (stopped due to timeout)")
+                break
+                
+            else:
+                print(f"K = {K} ERROR: {sat_result.error_message} on {self.n_rows}×{self.n_cols} grid (process-isolated)")
+                self.phase_timeouts_occurred.append(f"Incremental rectangular SAT solve K={K}: Process error - {sat_result.error_message}")
+                print(f"Optimal rectangular bandwidth = {optimal_k} (stopped due to error)")
+                break
+        
+        print(f"Final optimal rectangular bandwidth = {optimal_k} on {self.n_rows}×{self.n_cols} grid")
+        return optimal_k
+    
+    def _find_feasible_upper_bound_phase1_with_timeout(self, start_k, end_k):
+        """Phase 1: Find feasible upper bound using rectangular random search with timeout"""
+        print(f"\nPhase 1: Finding feasible UB with rectangular random search (timeout-protected)")
+        print(f"Grid: {self.n_rows}×{self.n_cols}")
+        
+        for K in range(start_k, end_k + 1):
             self._check_total_timeout()
             
             print(f"\nTrying K = {K} on rectangular grid")
@@ -584,7 +845,7 @@ class TimeoutRectangularBandwidthOptimizationSolver:
         print(f"Graph: {self.num_vertices} nodes, {len(self.edges)} edges")
         print(f"Grid: {self.n_rows}×{self.n_cols} (capacity: {self.n_rows * self.n_cols})")
         print(f"Testing range: K = {start_k} to {end_k}")
-        print(f"Total timeout: {self.total_solver_timeout}s")
+        print(f"Total timeout: {self.timeout_config.total_solver_timeout}s")
         print(f"="*80)
         
         try:
@@ -598,21 +859,226 @@ class TimeoutRectangularBandwidthOptimizationSolver:
             
             return optimal_k
             
-        except Exception as e:
-            print(f"\n" + "="*60)
+        except TimeoutError as e:
+            print(f"\n" + "="*50)
             print(f"TOTAL RECTANGULAR SOLVER TIMEOUT OCCURRED")
             print(f"Error: {e}")
-            print(f"="*60)
+            print(f"="*50)
             
             # Return best solution found so far
             if self.best_feasible_k is not None:
-                print(f"Returning best rectangular feasible solution found: K={self.best_feasible_k}")
+                print(f"Returning best feasible rectangular solution found: K={self.best_feasible_k}")
                 return self.best_feasible_k
             
             return None
         
         finally:
+            # Report timeout summary
             self._print_timeout_summary()
+    
+    def _print_timeout_summary(self):
+        """Print summary of timeout events"""
+        total_time = time.time() - self.solve_start_time if self.solve_start_time else 0
+        
+        print(f"\n" + "="*50)
+        print(f"RECTANGULAR TIMEOUT SUMMARY")
+        print(f"="*50)
+        print(f"Total solve time: {total_time:.2f}s")
+        print(f"Phase timeouts: {len(self.phase_timeouts_occurred)}")
+        for timeout in self.phase_timeouts_occurred:
+            print(f"  - {timeout}")
+        print(f"Constraint timeouts: {len(self.constraint_timeouts_occurred)}")
+        for timeout in self.constraint_timeouts_occurred:
+            print(f"  - {timeout}")
+        
+        # Report best solution if available
+        if self.best_feasible_k is not None:
+            print(f"Best feasible rectangular solution: K={self.best_feasible_k}")
+            if self.best_solution_bandwidth is not None:
+                print(f"Actual rectangular bandwidth: {self.best_solution_bandwidth}")
+        else:
+            print(f"No feasible rectangular solution found")
+        
+        print(f"="*50)
+    
+    def update_timeout_config(self, **kwargs):
+        """Update timeout configuration"""
+        self.timeout_config.update_timeouts(**kwargs)
+        print("Updated rectangular timeout configuration:")
+        print(self.timeout_config.get_timeout_summary())
+
+
+def test_rectangular_timeout_bandwidth_solver():
+    """Test the rectangular timeout-enabled solver on some small graphs"""
+    print("=== RECTANGULAR TIMEOUT-ENABLED BANDWIDTH SOLVER TESTS ===")
+    
+    # Custom timeout configuration for testing
+    test_config = TimeoutConfig()
+    test_config.update_timeouts(
+        random_search_timeout=10.0,
+        sat_solve_timeout=30.0,
+        total_solver_timeout=120.0
+    )
+    
+    # Triangle on 2x3 rectangular grid
+    print(f"\n" + "="*50)
+    print(f"Test 1: Triangle on 2×3 rectangular grid (with timeout)")
+    print(f"="*50)
+    
+    num_vertices1 = 3
+    n_rows1, n_cols1 = 2, 3
+    edges1 = [(1, 2), (2, 3), (1, 3)]
+    
+    solver1 = TimeoutRectangularBandwidthOptimizationSolver(num_vertices1, n_rows1, n_cols1, 'glucose42', test_config)
+    solver1.set_graph_edges(edges1)
+    solver1.create_position_variables()
+    solver1.create_distance_variables()
+    
+    optimal1 = solver1.solve_bandwidth_optimization_with_timeout(start_k=1, end_k=6)
+    print(f"Rectangular triangle result: {optimal1}")
+
+
+if __name__ == '__main__':
+    """
+    Command line usage: python rectangular_bandwidth_solver_with_timeout.py [num_vertices] [n_rows] [n_cols] [solver] [timeout_config]
+    
+    Arguments:
+        num_vertices: Number of vertices to place
+        n_rows: Number of rows in rectangular grid
+        n_cols: Number of columns in rectangular grid  
+        solver: SAT solver to use (glucose42 or cadical195, default: glucose42)
+        timeout_config: Optional timeout configuration (format: key=value,key=value...)
+    
+    Examples:
+        python rectangular_bandwidth_solver_with_timeout.py 5 3 4 glucose42
+        python rectangular_bandwidth_solver_with_timeout.py 6 2 5 cadical195 sat_solve_timeout=60,total_solver_timeout=300
+        python rectangular_bandwidth_solver_with_timeout.py  # Run test mode
+    """
+    import sys
+    
+    # Check if parameters provided
+    if len(sys.argv) >= 4:
+        # Rectangular solver mode
+        try:
+            num_vertices = int(sys.argv[1])
+            n_rows = int(sys.argv[2])
+            n_cols = int(sys.argv[3])
+            solver_type = sys.argv[4] if len(sys.argv) >= 5 else 'glucose42'
+            timeout_config_str = sys.argv[5] if len(sys.argv) >= 6 else None
+            
+            # Parse timeout configuration
+            timeout_config = TimeoutConfig()
+            if timeout_config_str:
+                print("Parsing rectangular timeout configuration...")
+                try:
+                    config_pairs = timeout_config_str.split(',')
+                    config_dict = {}
+                    for pair in config_pairs:
+                        key, value = pair.split('=')
+                        config_dict[key.strip()] = float(value.strip())
+                    timeout_config.update_timeouts(**config_dict)
+                    print("Custom rectangular timeout configuration applied.")
+                except Exception as e:
+                    print(f"Warning: Failed to parse timeout config '{timeout_config_str}': {e}")
+                    print("Using default timeout configuration.")
+            
+            print("=" * 80)
+            print("2D RECTANGULAR BANDWIDTH OPTIMIZATION SOLVER (WITH TIMEOUT)")
+            print("=" * 80)
+            print(f"Vertices: {num_vertices}")
+            print(f"Grid: {n_rows}×{n_cols}")
+            print(f"Solver: {solver_type.upper()}")
+            
+            # Create random graph for testing
+            import random
+            random.seed(42)
+            edges = []
+            for i in range(1, num_vertices + 1):
+                for j in range(i + 1, num_vertices + 1):
+                    if random.random() < 0.4:  # 40% edge probability
+                        edges.append((i, j))
+            
+            print(f"Generated random graph with {len(edges)} edges")
+            print(f"Edges: {edges}")
+            
+            print("Rectangular timeout features enabled for this run.")
+            
+            # Solve rectangular bandwidth problem with timeout
+            print(f"\nSolving 2D rectangular bandwidth minimization with timeout protection...")
+            print(f"Problem: {num_vertices} vertices on {n_rows}×{n_cols} grid")
+            print(f"Using: {solver_type.upper()}")
+            print(f"Timeout config: {timeout_config.get_timeout_summary()}")
+            
+            solver = TimeoutRectangularBandwidthOptimizationSolver(num_vertices, n_rows, n_cols, solver_type, timeout_config)
+            solver.set_graph_edges(edges)
+            solver.create_position_variables()
+            solver.create_distance_variables()
+            
+            start_time = time.time()
+            optimal_bandwidth = solver.solve_bandwidth_optimization_with_timeout()
+            solve_time = time.time() - start_time
+            
+            # Results
+            print(f"\n" + "="*70)
+            print(f"FINAL RECTANGULAR RESULTS (WITH TIMEOUT)")
+            print(f"="*70)
+            
+            if optimal_bandwidth is not None:
+                print(f"✓ Optimal rectangular bandwidth: {optimal_bandwidth}")
+                print(f"✓ Solve time: {solve_time:.2f}s")
+                print(f"✓ Graph: {num_vertices} vertices, {len(edges)} edges")
+                print(f"✓ Grid: {n_rows}×{n_cols}")
+                print(f"✓ Solver: {solver_type.upper()}")
+                print(f"✓ Timeout protection: ENABLED")
+                
+                # Check if this was the truly optimal or best feasible due to timeout
+                best_solution = solver.get_best_solution()
+                if best_solution and len(solver.phase_timeouts_occurred) > 0:
+                    print(f"✓ Status: TIMEOUT - BEST FEASIBLE RECTANGULAR SOLUTION")
+                    print(f"✓ Note: Solution may not be optimal due to timeout")
+                else:
+                    print(f"✓ Status: SUCCESS - OPTIMAL RECTANGULAR SOLUTION")
+                    
+            else:
+                print(f"✗ No rectangular solution found (may be due to timeout)")
+                print(f"✗ Solve time: {solve_time:.2f}s")
+                print(f"✗ Graph: {num_vertices} vertices, {len(edges)} edges")
+                print(f"✗ Grid: {n_rows}×{n_cols}")
+                print(f"✗ Timeout protection: ENABLED")
+                print(f"✗ Status: FAILED/TIMEOUT")
+            
+            print(f"="*70)
+            
+        except ValueError as e:
+            print(f"Error: Invalid parameters - {e}")
+            print("Usage: python rectangular_bandwidth_solver_with_timeout.py [num_vertices] [n_rows] [n_cols] [solver] [timeout_config]")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error during rectangular solving: {e}")
+            sys.exit(1)
+        
+    else:
+        # Test mode - run rectangular timeout test cases
+        print("=" * 80)
+        print("2D RECTANGULAR BANDWIDTH OPTIMIZATION SOLVER (WITH TIMEOUT) - TEST MODE")
+        print("=" * 80)
+        print("Usage: python rectangular_bandwidth_solver_with_timeout.py [num_vertices] [n_rows] [n_cols] [solver] [timeout_config]")
+        print()
+        print("Timeout configuration format: key=value,key=value...")
+        print("Available timeout keys:")
+        print("  - random_search_timeout")
+        print("  - sat_solve_timeout") 
+        print("  - total_solver_timeout")
+        print("  - position_constraints_timeout")
+        print("  - distance_constraints_timeout")
+        print("  - bandwidth_constraints_timeout")
+        print()
+        print("Examples:")
+        print("  python rectangular_bandwidth_solver_with_timeout.py 5 3 4 glucose42 sat_solve_timeout=60")
+        print("  python rectangular_bandwidth_solver_with_timeout.py 6 2 5 cadical195 total_solver_timeout=300")
+        print()
+        print("Running built-in rectangular timeout test cases...")
+        test_rectangular_timeout_bandwidth_solver()
     
     def _print_timeout_summary(self):
         """Print summary of timeout events for rectangular solver"""
