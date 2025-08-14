@@ -71,7 +71,6 @@ def encode_all_position_constraints(n, X_vars, Y_vars, vpool):
     """
     print(f"\nEncoding position constraints")
     print(f"Problem: {n} vertices on {n}x{n} grid")
-    print(f"Using NSC Sequential Counter for efficiency")
     
     all_clauses = []
     
@@ -82,10 +81,6 @@ def encode_all_position_constraints(n, X_vars, Y_vars, vpool):
     # 2. Position uniqueness constraints (at-most-one)
     uniqueness_clauses = encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool)
     all_clauses.extend(uniqueness_clauses)
-    
-    print(f"Total position clauses: {len(all_clauses)}")
-    print(f"Complexity: O(n³) = O({n}³) = {n**3}")
-    print(f"Position constraints complete\n")
     
     return all_clauses
 

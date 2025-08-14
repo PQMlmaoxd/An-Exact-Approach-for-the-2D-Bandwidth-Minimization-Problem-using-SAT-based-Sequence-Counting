@@ -1,6 +1,6 @@
 # mtx_bandwidth_validator_simple.py
-# Simple MTX bandwidth validator - no external dependencies
-# Just core validation with text output
+# Simple validator for a target bandwidth K
+# Usage: python mtx_bandwidth_validator_simple.py <mtx_file> <solver> <K>
 
 import os
 import sys
@@ -9,44 +9,114 @@ from typing import Dict, List, Tuple, Optional
 
 # Import our solver
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from bandwidth_optimization_solver import BandwidthOptimizationSolver
+from incremental_bandwidth_solver import IncrementalBandwidthSolver
 
-class SimpleMTXBandwidthValidator:
+class SingleKBandwidthSolver:
     """
-    MTX file validator for 2D bandwidth minimization
+    Single K bandwidth solver for validation (non-incremental)
     
-    Two output methods:
-    1. Label format: d(vertex1(x1,y1), vertex2(x2,y2)) = distance
-    2. ASCII grid: text-based grid visualization
+    Builds all constraints for a specific K value and solves once.
+    Used for validation, not optimization.
+    """
     
-    Features:
-        - Parses .mtx files (undirected graphs only)
-        - Validates bandwidth solutions
-        - Text-only output (no matplotlib needed)
-        - Works everywhere - pure Python
-    
-    Method comparison:
-    
-    Label format:
-        + Shows exact math - good for debugging
-        + Easy to verify each edge distance
-        + Works well for academic reports
+    def __init__(self, n, solver_type='glucose42'):
+        self.n = n
+        self.solver_type = solver_type
+        # Use IncrementalBandwidthSolver but don't use incremental features
+        self.base_solver = IncrementalBandwidthSolver(n, solver_type)
         
-        Example: d(1(1,2), 3(2,1)) = 2
+        # Expose the same interface
+        self.vpool = self.base_solver.vpool
+        self.X_vars = self.base_solver.X_vars
+        self.Y_vars = self.base_solver.Y_vars
+        self.edges = []
     
-    ASCII grid:
-        + Visual layout - easier to understand
-        + Quick pattern recognition
-        + Good for presentations
+    def set_graph_edges(self, edges):
+        """Set graph edges"""
+        self.edges = edges
+        self.base_solver.set_graph_edges(edges)
+    
+    def create_position_variables(self):
+        """Create position variables"""
+        self.base_solver.create_position_variables()
+        self.X_vars = self.base_solver.X_vars
+        self.Y_vars = self.base_solver.Y_vars
+    
+    def create_distance_variables(self):
+        """Create distance variables"""
+        self.base_solver.create_distance_variables()
+    
+    def encode_position_constraints(self):
+        """Encode position constraints"""
+        return self.base_solver.encode_position_constraints()
+    
+    def encode_distance_constraints(self):
+        """Encode distance constraints"""
+        return self.base_solver.encode_distance_constraints()
+    
+    def encode_thermometer_bandwidth_constraints(self, K):
+        """
+        Encode bandwidth <= K constraints (single K, non-incremental)
         
-        Example:
-           1 2 3
-        1  1 . .
-        2  . 2 3
-        3  . . .
+        For each edge: ensure Manhattan distance <= K
+        """
+        clauses = []
+        
+        for edge_id in self.base_solver.Tx_vars:
+            Tx = self.base_solver.Tx_vars[edge_id]  # Tx[i] means Tx >= i+1
+            Ty = self.base_solver.Ty_vars[edge_id]  # Ty[i] means Ty >= i+1
+            
+            # Tx <= K (i.e., not Tx >= K+1)
+            if K < len(Tx):
+                clause = [-Tx[K]]
+                clauses.append(clause)
+            
+            # Ty <= K (i.e., not Ty >= K+1)  
+            if K < len(Ty):
+                clause = [-Ty[K]]
+                clauses.append(clause)
+            
+            # Implication: Tx >= i → Ty <= K-i
+            for i in range(1, K + 1):
+                if K - i >= 0:
+                    tx_geq_i = None
+                    ty_leq_ki = None
+                    
+                    if i-1 < len(Tx):
+                        tx_geq_i = Tx[i-1]  # Tx >= i
+                    
+                    if K-i < len(Ty):
+                        ty_leq_ki = -Ty[K-i]  # Ty <= K-i (negated)
+                    
+                    if tx_geq_i is not None and ty_leq_ki is not None:
+                        clause = [-tx_geq_i, ty_leq_ki]
+                        clauses.append(clause)
+        
+        return clauses
     
-    Recommendation: Use both - label format for validation, 
-    grid format for understanding the solution layout.
+    def _create_solver(self):
+        """Create SAT solver instance"""
+        return self.base_solver._create_solver()
+
+
+class CustomKBandwidthValidator:
+    """
+    Custom K bandwidth validator for 2D bandwidth minimization
+    
+    Tests if a specific K value is achievable for a given graph.
+    
+    Usage:
+        python mtx_bandwidth_validator_simple.py <mtx_file> <solver> <K>
+        
+    Example:
+        python mtx_bandwidth_validator_simple.py 3.bcsstk01.mtx cadical195 4
+        
+    This will test if bandwidth K=4 is achievable for the graph in 3.bcsstk01.mtx
+    using the Cadical195 SAT solver.
+    
+    Output:
+        - SAT: K is achievable (solution exists)
+        - UNSAT: K is not achievable (no solution with bandwidth <= K)
     """
     
     def __init__(self, filename: str):
@@ -54,7 +124,6 @@ class SimpleMTXBandwidthValidator:
         self.filename = filename
         self.n = 0
         self.edges = []
-        # Removed: edge_weights, is_weighted, is_directed (dataset is undirected/unweighted only)
         
         self._parse_mtx_file()
     
@@ -64,34 +133,34 @@ class SimpleMTXBandwidthValidator:
         
         Handles MatrixMarket format:
         - Comments and metadata parsing
-        - Self-loop removal
+        - Self-loop removal  
         - Undirected graph processing only
         - Error handling for malformed files
         """
         print(f"Reading MTX file: {os.path.basename(self.filename)}")
-        
+
         try:
             with open(self.filename, 'r') as f:
                 lines = f.readlines()
         except FileNotFoundError:
             print(f"File not found: {self.filename}")
             return
-        
+
         header_found = False
         edges_set = set()
-        
+
         for line_num, line in enumerate(lines, 1):
             line = line.strip()
-            
+
             if not line:
                 continue
-                
+
             # Handle comments
             if line.startswith('%'):
-                # Skip metadata - dataset is all undirected/unweighted
+                # Skip metadata
                 continue
-            
-            # Parse dimensions
+
+            # Parse dimensions (first non-comment line)
             if not header_found:
                 try:
                     parts = line.split()
@@ -99,488 +168,251 @@ class SimpleMTXBandwidthValidator:
                         rows, cols, nnz = map(int, parts[:3])
                         self.n = max(rows, cols)
                         print(f"Matrix: {rows}×{cols}, {nnz} entries")
-                        print(f"Graph: undirected, unweighted (dataset standard)")
+                        print(f"Graph: undirected, unweighted")
                         header_found = True
                         continue
                 except ValueError:
                     print(f"Warning: bad header at line {line_num}: {line}")
                     continue
-            
+
             # Parse edges
             try:
                 parts = line.split()
                 if len(parts) >= 2:
                     u, v = int(parts[0]), int(parts[1])
                     # Ignore weights (parts[2]) - dataset is unweighted
-                    
+
                     if u == v:  # skip self-loops
                         continue
-                    
-                    # Always convert to undirected edge (sorted tuple)
+
+                    # Convert to undirected edge (sorted tuple)
                     edge = tuple(sorted([u, v]))
-                    
+
                     if edge not in edges_set:
                         edges_set.add(edge)
                         self.edges.append(edge)
-                            
+
             except (ValueError, IndexError):
                 print(f"Warning: bad edge at line {line_num}: {line}")
                 continue
-        
-        print(f"Loaded: {self.n} vertices, {len(self.edges)} edges")
+
+        print(f"Loaded {self.n} vertices and {len(self.edges)} edges")
     
-    def solve_bandwidth_problem(self, solver_type: str = 'glucose42') -> Tuple[Optional[int], Dict, Optional[Dict]]:
+    def test_bandwidth_k(self, K: int, solver_type: str = 'glucose42') -> Tuple[bool, Dict]:
         """
-        Solve 2D bandwidth minimization using SAT
+        Test if bandwidth K is achievable using SAT solver
         
-        Returns optimal bandwidth, solve info, and real assignment from SAT solution
+        Args:
+            K: Target bandwidth to test
+            solver_type: SAT solver to use ('glucose42' or 'cadical195')
+            
+        Returns:
+            (is_sat, info_dict) where:
+            - is_sat: True if K is achievable (SAT), False if not (UNSAT)
+            - info_dict: Detailed results including solve time, model, etc.
         """
-        print(f"\nSolving 2D bandwidth minimization")
-        print(f"Problem: {self.n} vertices on {self.n}×{self.n} grid")
-        print(f"Using: {solver_type.upper()}")
-        
-        self.solver = BandwidthOptimizationSolver(self.n, solver_type)
-        self.solver.set_graph_edges(self.edges)
-        self.solver.create_position_variables()
-        self.solver.create_distance_variables()
-        
+        print("\n" + "="*60)
+        print(f"Testing bandwidth K = {K}")
+        print("="*60)
+        print(f"Graph: {self.n} vertices, {len(self.edges)} edges")
+        print(f"Solver: {solver_type.upper()}")
+        print(f"Checking feasibility of bandwidth <= {K}")
+
+        # Create solver
+        solver = SingleKBandwidthSolver(self.n, solver_type)
+        solver.set_graph_edges(self.edges)
+        solver.create_position_variables()
+        solver.create_distance_variables()
+
+        # Build constraints for bandwidth <= K
+        print(f"Preparing SAT constraints for K = {K}...")
+
+        # Position constraints: each vertex gets exactly one position
+        position_clauses = solver.encode_position_constraints()
+        print(f"  Position constraints: {len(position_clauses)} clauses")
+
+        # Distance constraints: encode edge distances  
+        distance_clauses = solver.encode_distance_constraints()
+        print(f"  Distance constraints: {len(distance_clauses)} clauses")
+
+        # Bandwidth constraints: ensure all edges have distance <= K
+        bandwidth_clauses = solver.encode_thermometer_bandwidth_constraints(K)
+        print(f"  Bandwidth constraints: {len(bandwidth_clauses)} clauses")
+
+        # Combine all constraints
+        all_clauses = position_clauses + distance_clauses + bandwidth_clauses
+        total_clauses = len(all_clauses)
+        total_variables = solver.vpool.top
+
+        print(f"Total: {total_clauses} clauses, {total_variables} variables")
+
+        # Create SAT solver and add clauses
+        print(f"Starting {solver_type.upper()} solver")
+        sat_solver = solver._create_solver()
+
+        for clause in all_clauses:
+            sat_solver.add_clause(clause)
+
+        # Solve
         start_time = time.time()
-        optimal_bandwidth = self.solver.solve_bandwidth_optimization()
+        is_sat = sat_solver.solve()
         solve_time = time.time() - start_time
-        
-        # Extract real assignment from SAT solution if available
-        real_assignment = None
-        if optimal_bandwidth is not None and hasattr(self.solver, 'last_model'):
-            real_assignment = self.extract_assignment_from_sat_model(self.solver.last_model)
-        
-        solution_info = {
-            'solver_type': solver_type,
+
+        # Get model if SAT
+        model = None
+        solution_info = None
+        if is_sat:
+            model = sat_solver.get_model()
+            # Extract solution using SAME solver (same variable IDs)
+            if model:
+                solution_info = self.extract_and_verify_solution(model, K, solver)
+
+        # Clean up
+        sat_solver.delete()
+
+        # Build result info
+        result_info = {
+            'K': K,
+            'is_sat': is_sat,
             'solve_time': solve_time,
+            'solver_type': solver_type,
             'graph_size': self.n,
             'num_edges': len(self.edges),
-            'optimal_bandwidth': optimal_bandwidth,
-            'edges_per_vertex': len(self.edges) / self.n if self.n > 0 else 0
+            'total_clauses': total_clauses,
+            'total_variables': total_variables,
+            'model': model,
+            'solution_info': solution_info  # Add solution info here
         }
-        
-        print(f"Solve time: {solve_time:.2f}s")
-        if optimal_bandwidth is not None:
-            print(f"Optimal bandwidth: {optimal_bandwidth}")
-            if real_assignment:
-                print(f"Real SAT assignment extracted: {len(real_assignment)} vertices")
+
+        # Print results
+        print(f"Solve time: {solve_time:.3f} seconds")
+
+        if is_sat:
+            print("RESULT: SAT")
+            print(f"K = {K} is achievable")
+            print(f"The graph can be placed on a {self.n}×{self.n} grid with bandwidth <= {K}")
+            if model:
+                print(f"Solution model extracted ({len(model)} literals)")
         else:
-            print(f"No solution found")
-        
-        return optimal_bandwidth, solution_info, real_assignment
+            print("RESULT: UNSAT")
+            print(f"K = {K} is not achievable")
+            print(f"The graph cannot be placed on a {self.n}×{self.n} grid with bandwidth <= {K}")
+
+        return is_sat, result_info
     
-    def validate_solution_comprehensive(self, assignment: Dict[int, Tuple[int, int]], 
-                                      expected_bandwidth: int) -> Dict:
+    def extract_and_verify_solution(self, model, K: int, solver) -> Optional[Dict]:
         """
-        Validate solution thoroughly
+        Extract vertex positions from SAT model and verify the solution
         
-        Checks:
-        1. Max distance = expected bandwidth
-        2. At least one edge achieves max distance
-        3. All vertices within grid bounds
-        4. No position overlaps
+        Optimized version:
+        - Uses set for O(1) lookup instead of O(m) list operations
+        - Validates exactly-one constraint for each vertex position
+        - Detects invalid mappings early to prevent false positive results
         """
-        print(f"\nValidating bandwidth solution")
-        print(f"Expected bandwidth: {expected_bandwidth}")
-        print(f"Checking {len(assignment)} vertex positions...")
+        if not model:
+            return None
         
-        edge_distances = []
-        max_distance = 0
-        distance_counts = {}
-        position_conflicts = []
-        out_of_bounds = []
+        # Create set of positive literals for O(1) lookup
+        posset = {lit for lit in model if lit > 0}
         
-        # Check position validity
-        used_positions = set()
-        for vertex, (x, y) in assignment.items():
-            # Check bounds
-            if not (1 <= x <= self.n and 1 <= y <= self.n):
-                out_of_bounds.append((vertex, (x, y)))
+        positions = {}
+        violations = []  # Track vertices without exactly-one position
+        
+        # Extract positions for each vertex
+        for v in range(1, self.n + 1):
+            Xrow = solver.X_vars[v]  # list of var-ids for X_v=1..n
+            Yrow = solver.Y_vars[v]  # list of var-ids for Y_v=1..n
             
-            # Check uniqueness
-            pos = (x, y)
-            if pos in used_positions:
-                position_conflicts.append((vertex, pos))
+            # Find all X positions set to True
+            xs = [i for i, var in enumerate(Xrow, start=1) if var in posset]
+            # Find all Y positions set to True  
+            ys = [i for i, var in enumerate(Yrow, start=1) if var in posset]
+            
+            # Check exactly-one constraint
+            if len(xs) != 1 or len(ys) != 1:
+                violations.append((v, xs, ys))
             else:
-                used_positions.add(pos)
+                positions[v] = (xs[0], ys[0])
         
-        # Calculate distances
-        for u, v in self.edges:
-            if u in assignment and v in assignment:
-                x1, y1 = assignment[u]
-                x2, y2 = assignment[v]
-                distance = abs(x1 - x2) + abs(y1 - y2)
-                
-                edge_distances.append({
-                    'edge': (u, v),
-                    'positions': ((x1, y1), (x2, y2)),
-                    'distance': distance,
-                    'calculation': f"|{x1}-{x2}| + |{y1}-{y2}| = {abs(x1-x2)} + {abs(y1-y2)} = {distance}"
-                })
-                
-                max_distance = max(max_distance, distance)
-                distance_counts[distance] = distance_counts.get(distance, 0) + 1
-        
-        # Build validation results
-        validation_results = {
-            'is_valid': True,
-            'calculated_bandwidth': max_distance,
-            'expected_bandwidth': expected_bandwidth,
-            'edge_distances': edge_distances,
-            'distance_distribution': distance_counts,
-            'max_distance_edges': [ed for ed in edge_distances if ed['distance'] == max_distance],
-            'invalid_distances': [d for d in distance_counts.keys() if d > expected_bandwidth],
-            'position_conflicts': position_conflicts,
-            'out_of_bounds': out_of_bounds,
-            'validation_errors': []
-        }
-        
-        # Check for errors
-        if max_distance != expected_bandwidth:
-            validation_results['is_valid'] = False
-            validation_results['validation_errors'].append(
-                f"Bandwidth mismatch: got {max_distance}, expected {expected_bandwidth}"
-            )
-        
-        if position_conflicts:
-            validation_results['is_valid'] = False
-            validation_results['validation_errors'].append(
-                f"Position conflicts: {len(position_conflicts)} vertices overlap"
-            )
-        
-        if out_of_bounds:
-            validation_results['is_valid'] = False
-            validation_results['validation_errors'].append(
-                f"Out of bounds: {len(out_of_bounds)} vertices outside grid"
-            )
-        
-        # Print summary
-        print(f"Calculated bandwidth: {max_distance}")
-        print(f"Validation: {'PASSED' if validation_results['is_valid'] else 'FAILED'}")
-        
-        if validation_results['validation_errors']:
-            print(f"Errors:")
-            for error in validation_results['validation_errors']:
-                print(f"  - {error}")
-        
-        print(f"Distance counts: {dict(sorted(distance_counts.items()))}")
-        print(f"Critical edges: {len(validation_results['max_distance_edges'])}")
-        
-        return validation_results
-    
-    def decode_solution_label_format(self, assignment: Dict[int, Tuple[int, int]], 
-                                   validation_results: Dict) -> None:
-        """
-        Method 1: Label format - d(vertex1(x1,y1), vertex2(x2,y2)) = distance
-        
-        Shows exact math for each edge distance - good for debugging
-        and verification. Each distance calculation is explicit.
-        """
-        print(f"\n" + "="*60)
-        print(f"METHOD 1: LABEL FORMAT")
-        print(f"Format: d(vertex1(x1,y1), vertex2(x2,y2)) = distance")
-        print(f"=" * 60)
-        
-        # Sort by distance (largest first)
-        sorted_edges = sorted(validation_results['edge_distances'], 
-                            key=lambda x: (-x['distance'], x['edge']))
-        
-        # Group by distance
-        distance_groups = {}
-        for edge_data in sorted_edges:
-            dist = edge_data['distance']
-            if dist not in distance_groups:
-                distance_groups[dist] = []
-            distance_groups[dist].append(edge_data)
-        
-        # Show each distance group
-        for distance in sorted(distance_groups.keys(), reverse=True):
-            edges_at_distance = distance_groups[distance]
-            is_max = distance == validation_results['calculated_bandwidth']
-            status = "MAX" if is_max else "normal"
-            
-            print(f"\nDistance = {distance} ({status}) - {len(edges_at_distance)} edges:")
-            
-            for i, edge_data in enumerate(edges_at_distance, 1):
-                u, v = edge_data['edge']
-                (x1, y1), (x2, y2) = edge_data['positions']
-                calculation = edge_data['calculation']
-                
-                print(f"   {i:2}. d({u}({x1},{y1}), {v}({x2},{y2})) = {distance}")
-                print(f"       └─ {calculation}")
-        
-        # Summary
-        print(f"\n" + "="*40)
-        print(f"VALIDATION SUMMARY")
-        print(f"="*40)
-        print(f"   Total edges: {len(sorted_edges)}")
-        print(f"   Bandwidth: {validation_results['calculated_bandwidth']}")
-        print(f"   Distance range: {min(distance_groups.keys())} to {max(distance_groups.keys())}")
-        print(f"   Critical edges: {len(validation_results['max_distance_edges'])}")
-        print(f"   Status: {'PASSED' if validation_results['is_valid'] else 'FAILED'}")
-        
-        # Distance breakdown
-        print(f"\nDistance breakdown:")
-        for dist in sorted(distance_groups.keys()):
-            count = len(distance_groups[dist])
-            percentage = (count / len(sorted_edges)) * 100
-            bar = "█" * min(int(percentage / 3), 20)
-            marker = "MAX" if dist == validation_results['calculated_bandwidth'] else ""
-            print(f"   {dist:2}: {count:2} edges ({percentage:4.1f}%) {marker} {bar}")
-    
-    def visualize_solution_matrix_format(self, assignment: Dict[int, Tuple[int, int]], 
-                                       validation_results: Dict) -> None:
-        """
-        Method 2: ASCII grid visualization
-        
-        Shows spatial layout on n×n grid - easier to understand
-        vertex placement and see patterns visually.
-        """
-        print(f"\n" + "="*60)
-        print(f"METHOD 2: ASCII GRID")
-        print(f"Layout: {self.n}×{self.n} grid with vertex positions")
-        print(f"=" * 60)
-        
-        # Build grid
-        grid = [['.' for _ in range(self.n)] for _ in range(self.n)]
-        vertex_positions = {}
-        
-        # Place vertices
-        for vertex, (x, y) in assignment.items():
-            if 1 <= x <= self.n and 1 <= y <= self.n:
-                grid[y-1][x-1] = str(vertex)
-                vertex_positions[vertex] = (x, y)
-        
-        # Show grid
-        print(f"\nGrid layout:")
-        print("   " + "".join(f"{x:3}" for x in range(1, self.n + 1)))
-        print("   " + "───" * self.n)
-        
-        for y in range(self.n):
-            row_display = "".join(f"{grid[y][x]:3}" for x in range(self.n))
-            print(f"{y+1:2}│{row_display}")
-        
-        # Edge analysis
-        print(f"\nEdge distances:")
-        print(f"{'Edge':<10} {'Positions':<18} {'Dist':<6} {'Status'}")
-        print("─" * 45)
-        
-        for edge_data in sorted(validation_results['edge_distances'], 
-                              key=lambda x: -x['distance']):
-            u, v = edge_data['edge']
-            distance = edge_data['distance']
-            (x1, y1), (x2, y2) = edge_data['positions']
-            
-            status = "MAX" if distance == validation_results['calculated_bandwidth'] else ""
-            positions_str = f"({x1},{y1})↔({x2},{y2})"
-            print(f"({u},{v}){'':<4} {positions_str:<18} {distance:<6} {status}")
-        
-        # Distance distribution chart
-        print(f"\nDistance distribution:")
-        dist_counts = validation_results['distance_distribution']
-        max_count = max(dist_counts.values()) if dist_counts else 0
-        
-        for dist in sorted(dist_counts.keys()):
-            count = dist_counts[dist]
-            bar_width = int((count / max_count) * 25) if max_count > 0 else 0
-            bar = "█" * bar_width
-            marker = "MAX" if dist == validation_results['calculated_bandwidth'] else ""
-            print(f"   {dist:2}: {count:2} edges {marker} {bar}")
-        
-        # Spatial stats
-        print(f"\n" + "="*40)
-        print(f"SPATIAL SUMMARY")
-        print(f"="*40)
-        
-        if vertex_positions:
-            x_coords = [pos[0] for pos in vertex_positions.values()]
-            y_coords = [pos[1] for pos in vertex_positions.values()]
-            
-            x_spread = max(x_coords) - min(x_coords) + 1
-            y_spread = max(y_coords) - min(y_coords) + 1
-            utilization = len(vertex_positions) / (self.n * self.n) * 100
-            
-            print(f"   Grid: {self.n}×{self.n}")
-            print(f"   Used area: {x_spread}×{y_spread}")
-            print(f"   Utilization: {utilization:.1f}%")
-            print(f"   Vertices: {len(vertex_positions)}")
-            print(f"   Bandwidth: {validation_results['calculated_bandwidth']}")
-            print(f"   Efficiency: {validation_results['calculated_bandwidth']}/{max(x_spread, y_spread):.1f}")
-    
-    def extract_assignment_from_sat_model(self, model) -> Optional[Dict[int, Tuple[int, int]]]:
-        """
-        Extract real vertex positions from SAT model
-        
-        Converts SAT solution back to (x,y) coordinates for each vertex
-        """
-        if not model or not hasattr(self.solver, 'X_vars') or not hasattr(self.solver, 'Y_vars'):
-            print("Warning: No SAT model or variables available")
-            return None
-        
-        assignment = {}
-        
-        try:
-            for v in range(1, self.n + 1):
-                # Find X position for vertex v
-                x_pos = None
-                for pos in range(1, self.n + 1):
-                    var_id = self.solver.X_vars[v][pos-1]
-                    if var_id in model:
-                        x_pos = pos
-                        break
-                
-                # Find Y position for vertex v  
-                y_pos = None
-                for pos in range(1, self.n + 1):
-                    var_id = self.solver.Y_vars[v][pos-1]
-                    if var_id in model:
-                        y_pos = pos
-                        break
-                
-                if x_pos is not None and y_pos is not None:
-                    assignment[v] = (x_pos, y_pos)
-                else:
-                    print(f"Warning: Could not find position for vertex {v}")
-            
-            print(f"Extracted real assignment for {len(assignment)} vertices")
-            return assignment
-            
-        except Exception as e:
-            print(f"Error extracting assignment from SAT model: {e}")
-            return None
-    def generate_mock_assignment_from_solution(self, optimal_bandwidth: int) -> Dict[int, Tuple[int, int]]:
-        """
-        Generate test assignment that achieves target bandwidth
-        
-        Creates placement for demo purposes. Used as fallback when
-        real SAT assignment extraction fails.
-        """
-        print(f"\nGenerating fallback assignment for bandwidth = {optimal_bandwidth}")
-        
-        assignment = {}
-        
-        # Small graphs: linear arrangement
-        if self.n <= 4:
-            for i in range(1, self.n + 1):
-                x = i
-                y = 1 if i % 2 == 1 else 2
-                assignment[i] = (x, y)
-        
-        # Medium graphs: compact center placement
-        elif self.n <= 8:
-            positions_used = set()
-            for i in range(1, self.n + 1):
-                center = self.n // 2 + 1
-                for distance in range(self.n):
-                    for dx in range(-distance, distance + 1):
-                        for dy in range(-distance, distance + 1):
-                            if abs(dx) + abs(dy) <= distance:
-                                x, y = center + dx, center + dy
-                                if (1 <= x <= self.n and 1 <= y <= self.n and 
-                                    (x, y) not in positions_used):
-                                    assignment[i] = (x, y)
-                                    positions_used.add((x, y))
-                                    break
-                        if i in assignment:
-                            break
-                    if i in assignment:
-                        break
-        
-        # Large graphs: grid spreading
-        else:
-            for i in range(1, min(self.n + 1, self.n * self.n + 1)):
-                x = ((i - 1) % self.n) + 1
-                y = ((i - 1) // self.n) + 1
-                assignment[i] = (x, y)
-        
-        return assignment
-    
-    def run_complete_validation(self, solver_type: str = 'glucose42') -> Dict:
-        """
-        Complete MTX validation workflow with dual decode methods
-        
-        Full process: parse MTX → solve SAT → validate → display results
-        Shows both label format and grid visualization.
-        """
-        print(f"\n" + "="*70)
-        print(f"COMPLETE MTX BANDWIDTH VALIDATION")
-        print(f"="*70)
-        print(f"File: {os.path.basename(self.filename)}")
-        print(f"Solver: {solver_type.upper()}")
-        print(f"Target: Find and validate optimal bandwidth")
-        
-        # Solve bandwidth problem
-        optimal_bandwidth, solution_info, real_assignment = self.solve_bandwidth_problem(solver_type)
-        
-        if optimal_bandwidth is None:
+        # Handle constraint violations
+        if violations:
+            print("\nModel decode error: some vertices do not have exactly one X and one Y position.")
+            for v, xs, ys in violations[:10]:  # Show first 10 violations
+                print(f"  v{v}: X_true={xs}, Y_true={ys}")
+            # Do not compute bandwidth for an invalid assignment
             return {
-                'status': 'failed', 
-                'reason': 'solver_failed',
-                'filename': self.filename,
-                'solver_type': solver_type
+                'positions': positions,
+                'actual_bandwidth': None,
+                'constraint_K': K,
+                'is_valid': False,
+                'edge_distances': [],
+                'reason': 'positions_not_exactly_one'
             }
         
-        # Use real assignment if available, otherwise generate fallback
-        if real_assignment is None:
-            print("No real SAT assignment available, using fallback")
-            assignment = self.generate_mock_assignment_from_solution(optimal_bandwidth)
-        else:
-            print("Using real SAT solution assignment")
-            assignment = real_assignment
+        # Calculate actual bandwidth
+        max_distance = 0
+        edge_distances = []
         
-        # Validate solution
-        validation_results = self.validate_solution_comprehensive(assignment, optimal_bandwidth)
+        for u, v in self.edges:
+            x1, y1 = positions[u]
+            x2, y2 = positions[v] 
+            distance = abs(x1 - x2) + abs(y1 - y2)
+            edge_distances.append((u, v, distance))
+            if distance > max_distance:
+                max_distance = distance
         
-        # Show results with both decode methods
-        print(f"\n" + "="*70)
-        print(f"DUAL DECODE METHOD ANALYSIS")
-        print(f"="*70)
+        is_valid = (max_distance <= K)
         
-        # Method 1: Label format
-        self.decode_solution_label_format(assignment, validation_results)
+        # Detailed solution report
+        print("\nSolution verification")
+        print("-"*50)
+        print(f"Extracted positions: {len(positions)} vertices")
         
-        # Method 2: Grid visualization
-        self.visualize_solution_matrix_format(assignment, validation_results)
+        # Show vertex positions (first 20)
+        max_show = min(20, len(positions))
+        for v in sorted(list(positions.keys())[:max_show]):
+            x, y = positions[v]
+            print(f"  v{v}: ({x}, {y})")
+        if len(positions) > max_show:
+            print(f"  ... and {len(positions) - max_show} more vertices")
         
-        # Final results
-        final_results = {
-            'status': 'success',
-            'filename': self.filename,
-            'graph_properties': {
-                'vertices': self.n,
-                'edges': len(self.edges),
-                'is_directed': False,  # Dataset is undirected only
-                'is_weighted': False,  # Dataset is unweighted only
-                'density': len(self.edges) / (self.n * (self.n - 1) / 2) if self.n > 1 else 0
-            },
-            'solution_info': solution_info,
-            'validation_results': validation_results,
-            'assignment': assignment,
-            'decode_methods': {
-                'label_based': 'Mathematical precision for verification',
-                'matrix_based': 'Visual intuition for understanding'
-            }
+        # Show edge distances (all edges)
+        print(f"\nEdge distances ({len(edge_distances)} edges):")
+        for u, v, distance in edge_distances:
+            marker = "ok" if distance <= K else "exceeds"
+            print(f"  ({u},{v}): {distance} [{marker}]")
+        
+        print(f"\nBandwidth summary:")
+        print(f"  Actual: {max_distance}")
+        print(f"  Limit:  {K}")
+        print(f"  Valid:  {'Yes' if is_valid else 'No'}")
+        print(f"  Edges within limit: {sum(1 for _, _, d in edge_distances if d <= K)}/{len(edge_distances)}")
+        
+        return {
+            'positions': positions,
+            'actual_bandwidth': max_distance,
+            'constraint_K': K,
+            'is_valid': is_valid,
+            'edge_distances': edge_distances
         }
-        
-        print(f"\n" + "="*70)
-        print(f"VALIDATION COMPLETE")
-        print(f"="*70)
-        print(f"Result: {'PASSED' if validation_results['is_valid'] else 'FAILED'}")
-        print(f"Bandwidth: {optimal_bandwidth}")
-        print(f"Time: {solution_info['solve_time']:.2f} seconds")
-        
-        return final_results
 
 
-def validate_mtx_file(mtx_file: str, solver_type: str = 'glucose42') -> Dict:
+def validate_custom_k(mtx_file: str, solver_type: str, K: int) -> Dict:
     """
-    Validate any MTX file - convenient wrapper function
+    Test if bandwidth K is achievable for given MTX file
+    
+    Args:
+        mtx_file: Path to MTX file
+        solver_type: SAT solver ('glucose42' or 'cadical195')
+        K: Target bandwidth to test
+        
+    Returns:
+        Dictionary with test results
     """
-    print(f"MTX BANDWIDTH VALIDATION TOOL")
-    print(f"Target: {mtx_file}")
+    print(f"CUSTOM K BANDWIDTH VALIDATOR")
+    print(f"File: {mtx_file}")
+    print(f"Solver: {solver_type}")
+    print(f"Target K: {K}")
     
     # Search for file in common locations
     if not os.path.exists(mtx_file):
@@ -589,11 +421,9 @@ def validate_mtx_file(mtx_file: str, solver_type: str = 'glucose42') -> Dict:
             f"mtx/{mtx_file}",
             f"mtx/group 1/{mtx_file}",
             f"mtx/group 2/{mtx_file}",
-            f"sample_mtx_datasets/{mtx_file}",
             f"mtx/{mtx_file}.mtx",
             f"mtx/group 1/{mtx_file}.mtx",
-            f"mtx/group 2/{mtx_file}.mtx",
-            f"sample_mtx_datasets/{mtx_file}.mtx"
+            f"mtx/group 2/{mtx_file}.mtx"
         ]
         
         found_file = None
@@ -612,145 +442,135 @@ def validate_mtx_file(mtx_file: str, solver_type: str = 'glucose42') -> Dict:
         
         mtx_file = found_file
     
-    validator = SimpleMTXBandwidthValidator(mtx_file)
-    results = validator.run_complete_validation(solver_type)
+    # Run validation
+    validator = CustomKBandwidthValidator(mtx_file)
+    is_sat, result_info = validator.test_bandwidth_k(K, solver_type)
     
-    return results
+    # Get solution info directly from result_info (already extracted with correct solver)
+    solution_info = result_info.get('solution_info')
+    
+    return {
+        'status': 'success',
+        'filename': mtx_file,
+        'K': K,
+        'is_sat': is_sat,
+        'result_info': result_info,
+        'solution_info': solution_info
+    }
 
 
 if __name__ == "__main__":
     """
-    Command line usage: python mtx_bandwidth_validator_simple.py [mtx_file] [solver]
+    Command line usage: python mtx_bandwidth_validator_simple.py <mtx_file> <solver> <K>
+    
+    Arguments:
+        mtx_file: Name of MTX file (searches in mtx/group 1/ and mtx/group 2/)
+        solver: SAT solver to use (glucose42 or cadical195, default: glucose42)
+        K: Target bandwidth to test (required)
     
     Examples:
-        python mtx_bandwidth_validator_simple.py cage3.mtx
-        python mtx_bandwidth_validator_simple.py sample_mtx_datasets/complete_k4.mtx glucose42
-        python mtx_bandwidth_validator_simple.py  # Run test mode
+        python mtx_bandwidth_validator_simple.py 3.bcsstk01.mtx cadical195 4
+        python mtx_bandwidth_validator_simple.py 8.jgl009.mtx glucose42 10
+        python mtx_bandwidth_validator_simple.py 1.ash85.mtx cadical195 25
+    
+    Output:
+        SAT: K is achievable (bandwidth <= K is possible)
+        UNSAT: K is not achievable (bandwidth <= K is impossible)
     """
-    import sys
     
-    # Check if specific MTX file provided
-    if len(sys.argv) >= 2:
-        # Single file validation mode
-        mtx_file = sys.argv[1]
-        solver_type = sys.argv[2] if len(sys.argv) >= 3 else 'glucose42'
-        
+    # Check arguments
+    if len(sys.argv) < 4:
         print("=" * 80)
-        print("MTX BANDWIDTH VALIDATOR - SINGLE FILE MODE")
+        print("CUSTOM K BANDWIDTH VALIDATOR")
         print("=" * 80)
-        print(f"File: {mtx_file}")
-        print(f"Solver: {solver_type}")
-        
-        # Add common paths if file not found directly
-        if not os.path.exists(mtx_file):
-            search_paths = [
-                f"mtx/{mtx_file}",
-                f"mtx/group 1/{mtx_file}",
-                f"mtx/group 2/{mtx_file}",
-                f"sample_mtx_datasets/{mtx_file}",
-                f"mtx/{mtx_file}.mtx",
-                f"mtx/group 1/{mtx_file}.mtx",
-                f"mtx/group 2/{mtx_file}.mtx",
-                f"sample_mtx_datasets/{mtx_file}.mtx"
-            ]
-            
-            for path in search_paths:
-                if os.path.exists(path):
-                    mtx_file = path
-                    print(f"Found file at: {path}")
-                    break
-            else:
-                print(f"Error: File '{sys.argv[1]}' not found")
-                print("Searched in:")
-                for path in search_paths:
-                    print(f"  - {path}")
-                sys.exit(1)
-        
-        # Run validation
-        try:
-            results = validate_mtx_file(mtx_file, solver_type)
-            
-            # Print summary
-            print("\n" + "="*60)
-            print("FINAL SUMMARY")
-            print("="*60)
-            
-            status = results.get('status', 'unknown')
-            if status == 'success':
-                validation = results.get('validation_results', {})
-                bandwidth = validation.get('calculated_bandwidth', 'N/A')
-                is_valid = validation.get('is_valid', False)
-                solve_time = results.get('solution_info', {}).get('solve_time', 0)
-                
-                print(f"✓ Validation: {'PASSED' if is_valid else 'FAILED'}")
-                print(f"✓ Bandwidth: {bandwidth}")
-                print(f"✓ Solve time: {solve_time:.2f}s")
-                print(f"✓ Status: SUCCESS")
-            else:
-                print(f"✗ Status: {status.upper()}")
-                if 'reason' in results:
-                    print(f"✗ Reason: {results['reason']}")
-                
-        except Exception as e:
-            print(f"Error during validation: {e}")
-            sys.exit(1)
+        print("Usage: python mtx_bandwidth_validator_simple.py <mtx_file> <solver> <K>")
+        print()
+        print("Arguments:")
+        print("  mtx_file: Name of MTX file")
+        print("  solver:   SAT solver (glucose42 or cadical195)")
+        print("  K:        Target bandwidth to test")
+        print()
+        print("Examples:")
+        print("  python mtx_bandwidth_validator_simple.py 3.bcsstk01.mtx cadical195 4")
+        print("  python mtx_bandwidth_validator_simple.py 8.jgl009.mtx glucose42 10")
+        print("  python mtx_bandwidth_validator_simple.py 1.ash85.mtx cadical195 25")
+        print()
+        print("Available MTX files:")
+        print("  Group 1: 1.bcspwr01.mtx, 2.bcspwr02.mtx, 3.bcsstk01.mtx, 4.can___24.mtx,")
+        print("           5.fidap005.mtx, 6.fidapm05.mtx, 7.ibm32.mtx, 8.jgl009.mtx,")
+        print("           9.jgl011.mtx, 10.lap_25.mtx, 11.pores_1.mtx, 12.rgg010.mtx")
+        print("  Group 2: 1.ash85.mtx")
+        print()
+        print("Output:")
+        print("  SAT:   K is achievable (solution exists)")
+        print("  UNSAT: K is not achievable (no solution with bandwidth <= K)")
+        sys.exit(1)
     
-    else:
-        # Testing mode - run validation on sample files
-        print("=" * 80)
-        print("SIMPLE MTX BANDWIDTH VALIDATOR - TESTING MODE")
-        print("Zero dependencies - Pure Python implementation")
-        print("=" * 80)
+    # Parse arguments
+    mtx_file = sys.argv[1]
+    solver_type = sys.argv[2]
+    
+    try:
+        K = int(sys.argv[3])
+    except ValueError:
+        print(f"Error: K must be an integer, got '{sys.argv[3]}'")
+        sys.exit(1)
+    
+    if K <= 0:
+        print(f"Error: K must be positive, got {K}")
+        sys.exit(1)
+    
+    if solver_type not in ['glucose42', 'cadical195']:
+        print(f"Error: Solver must be 'glucose42' or 'cadical195', got '{solver_type}'")
+        sys.exit(1)
+    
+    # Run validation
+    print("=" * 80)
+    print("CUSTOM K BANDWIDTH VALIDATOR")
+    print("=" * 80)
+    print(f"File: {mtx_file}")
+    print(f"Solver: {solver_type.upper()}")
+    print(f"Target K: {K}")
+    
+    try:
+        results = validate_custom_k(mtx_file, solver_type, K)
         
-        # Test files by complexity
-        test_files = [
-            "mtx/cage3.mtx",                    # Small real-world example
-            "sample_mtx_datasets/complete_k4.mtx",  # Complete graph
-            "sample_mtx_datasets/path_p6.mtx",      # Path graph
-            "sample_mtx_datasets/cycle_c5.mtx",     # Cycle graph
-        ]
+        # Print final result
+        print(f"\n" + "="*60)
+        print(f"FINAL RESULT")
+        print(f"="*60)
         
-        results_summary = []
-        
-        for i, mtx_file in enumerate(test_files, 1):
-            print(f"\n{'='*80}")
-            print(f"TEST CASE {i}/{len(test_files)}: {os.path.basename(mtx_file)}")
-            print(f"{'='*80}")
+        status = results.get('status', 'unknown')
+        if status == 'success':
+            is_sat = results.get('is_sat', False)
+            result_info = results.get('result_info', {})
+            solve_time = result_info.get('solve_time', 0)
             
-            if os.path.exists(mtx_file):
-                try:
-                    results = validate_mtx_file(mtx_file, 'glucose42')
-                    results_summary.append({
-                        'file': mtx_file,
-                        'status': results.get('status', 'unknown'),
-                        'bandwidth': results.get('validation_results', {}).get('calculated_bandwidth', 'N/A'),
-                        'validation': results.get('validation_results', {}).get('is_valid', False)
-                    })
-                    print(f"Test {i} completed successfully")
-                except Exception as e:
-                    print(f"Test {i} failed with error: {e}")
-                    results_summary.append({
-                        'file': mtx_file,
-                        'status': 'error',
-                        'error': str(e)
-                    })
+            if is_sat:
+                print(f"✓ RESULT: SAT")
+                print(f"✓ K = {K} is ACHIEVABLE")
+                print(f"✓ The graph CAN be placed with bandwidth <= {K}")
+                print(f"✓ Solve time: {solve_time:.3f}s")
+                
+                # Show solution if extracted
+                solution_info = results.get('solution_info')
+                if solution_info and solution_info['is_valid']:
+                    actual_bw = solution_info['actual_bandwidth']
+                    print(f"✓ Actual bandwidth in solution: {actual_bw}")
+                    print(f"✓ Solution verified: VALID")
             else:
-                print(f"Test {i} skipped - file not found: {mtx_file}")
-                results_summary.append({
-                    'file': mtx_file,
-                    'status': 'file_not_found'
-                })
-        
-        # Summary report
-        print(f"\n" + "="*80)
-        print(f"TESTING COMPLETE - SUMMARY REPORT")
-        print(f"="*80)
-        
-        for i, result in enumerate(results_summary, 1):
-            status_icon = "✓" if result['status'] == 'success' else "✗"
-            file_name = os.path.basename(result['file'])
-            print(f"{status_icon} Test {i}: {file_name:<25} | Status: {result['status']:<12} | Bandwidth: {result.get('bandwidth', 'N/A')}")
-        
-        successful_tests = sum(1 for r in results_summary if r['status'] == 'success')
-        print(f"\nSuccess rate: {successful_tests}/{len(results_summary)} tests passed")
-        print(f"MTX Bandwidth Validator testing complete!")
+                print(f"✗ RESULT: UNSAT")
+                print(f"✗ K = {K} is NOT ACHIEVABLE") 
+                print(f"✗ The graph CANNOT be placed with bandwidth <= {K}")
+                print(f"✗ Solve time: {solve_time:.3f}s")
+                print(f"✗ K = {K} is not the bandwidth of this graph")
+                
+        elif status == 'file_not_found':
+            print(f"✗ ERROR: File not found")
+            print(f"✗ Searched for: {mtx_file}")
+        else:
+            print(f"✗ ERROR: {status}")
+            
+    except Exception as e:
+        print(f"✗ ERROR: {e}")
+        sys.exit(1)

@@ -1,6 +1,4 @@
-pdf/
-__pycache__/ 
-test/
-main encoder/
-bin/
+benchmark_automation/
+runlim/
+__pycache__/
 .venv/
