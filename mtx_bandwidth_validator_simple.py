@@ -421,9 +421,13 @@ def validate_custom_k(mtx_file: str, solver_type: str, K: int) -> Dict:
             f"mtx/{mtx_file}",
             f"mtx/group 1/{mtx_file}",
             f"mtx/group 2/{mtx_file}",
+            f"mtx/group 3/{mtx_file}",
+            f"mtx/regular/{mtx_file}",
             f"mtx/{mtx_file}.mtx",
             f"mtx/group 1/{mtx_file}.mtx",
-            f"mtx/group 2/{mtx_file}.mtx"
+            f"mtx/group 2/{mtx_file}.mtx",
+            f"mtx/group 3/{mtx_file}.mtx",
+            f"mtx/regular/{mtx_file}.mtx"
         ]
         
         found_file = None

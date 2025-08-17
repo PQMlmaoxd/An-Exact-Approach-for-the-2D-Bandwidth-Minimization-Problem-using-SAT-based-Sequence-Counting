@@ -73,7 +73,7 @@ class IncrementalBandwidthSolver:
     
     Strategy:
     1. Keep one solver alive for entire optimization process
-    2. Add base constraints (position, distance, symmetry) once at start
+    2. Add base constraints (position, distance) once at start
     3. For each K value, only add tightening bandwidth constraints
     4. Use actual bandwidth from SAT models to jump to better K values
     5. Leverage learnt clauses across all K values for maximum performance
@@ -151,35 +151,6 @@ class IncrementalBandwidthSolver:
         
         return clauses
     
-    def encode_symmetry_breaking_constraints(self):
-        """
-        Add symmetry breaking constraints to reduce search space
-        
-        Strategy:
-        1. Fix vertex 1 at position (1,1) 
-        2. Fix vertex 2 on first row or first column
-        3. Order vertices by degree (optional)
-        """
-        clauses = []
-        
-        print(f"Adding symmetry breaking constraints...")
-        
-        # Fix vertex 1 at position (1,1)
-        if 1 in self.X_vars and 1 in self.Y_vars:
-            # X_1[0] = true (vertex 1 at X position 1)
-            clauses.append([self.X_vars[1][0]])
-            # Y_1[0] = true (vertex 1 at Y position 1)  
-            clauses.append([self.Y_vars[1][0]])
-            print(f"  Fixed vertex 1 at position (1,1)")
-        
-        # Fix vertex 2 on first row (Y=1) to break rotation symmetry
-        if 2 in self.Y_vars and len(self.edges) > 0:
-            clauses.append([self.Y_vars[2][0]])
-            print(f"  Fixed vertex 2 on first row (Y=1)")
-        
-        print(f"  Added {len(clauses)} symmetry breaking clauses")
-        return clauses
-    
     def _create_solver(self):
         """Create SAT solver instance"""
         if self.solver_type == 'glucose42':
@@ -197,7 +168,6 @@ class IncrementalBandwidthSolver:
         Base constraints include:
         - Position constraints (each vertex gets one position)
         - Distance constraints (Manhattan distance encoding)
-        - Symmetry breaking constraints
         
         These constraints are K-independent and added once.
         """
@@ -226,15 +196,7 @@ class IncrementalBandwidthSolver:
         for clause in distance_clauses:
             self.persistent_solver.add_clause(clause)
         
-        # Add symmetry breaking constraints
-        print(f"  Adding symmetry breaking constraints...")
-        symmetry_clauses = self.encode_symmetry_breaking_constraints()
-        print(f"    Symmetry: {len(symmetry_clauses)} clauses")
-        
-        for clause in symmetry_clauses:
-            self.persistent_solver.add_clause(clause)
-        
-        total_base_clauses = len(position_clauses) + len(distance_clauses) + len(symmetry_clauses)
+        total_base_clauses = len(position_clauses) + len(distance_clauses)
         print(f"  Total base constraints: {total_base_clauses} clauses")
         
         self.base_constraints_added = True
@@ -580,7 +542,7 @@ def test_incremental_bandwidth_solver():
     print(f"Cycle (5 nodes): {optimal3}")
     print(f"="*80)
     print(f"Strategy: Monotone strengthening with persistent solver")
-    print(f"Benefits: Learnt clauses reuse, no solver restarts, smart jumping")
+    print(f"Benefits: Learnt clauses reuse, no solver restarts, smart jumping, exact solutions")
     print(f"="*80)
 
 if __name__ == '__main__':
@@ -628,11 +590,13 @@ if __name__ == '__main__':
                 f"mtx/group 1/{mtx_file}",
                 f"mtx/group 2/{mtx_file}",
                 f"mtx/group 3/{mtx_file}",
+                f"mtx/regular/{mtx_file}",
                 f"sample_mtx_datasets/{mtx_file}",
                 f"mtx/{mtx_file}.mtx",
                 f"mtx/group 1/{mtx_file}.mtx", 
                 f"mtx/group 2/{mtx_file}.mtx",
                 f"mtx/group 3/{mtx_file}.mtx",
+                f"mtx/regular/{mtx_file}.mtx",
                 f"sample_mtx_datasets/{mtx_file}.mtx"
             ]
             
@@ -668,7 +632,14 @@ if __name__ == '__main__':
                     for file in sorted(os.listdir(group3_path)):
                         if file.endswith('.mtx'):
                             print(f"  - {file}")
-                            
+
+                print(f"\nAvailable files in mtx/regular/:")
+                regular_path = "mtx/regular"
+                if os.path.exists(regular_path):
+                    for file in sorted(os.listdir(regular_path)):
+                        if file.endswith('.mtx'):
+                            print(f"  - {file}")
+
                 print(f"\nUsage examples:")
                 print(f"  python incremental_bandwidth_solver.py 8.jgl009.mtx glucose42")
                 print(f"  python incremental_bandwidth_solver.py 1.ash85.mtx cadical195")
@@ -799,7 +770,7 @@ if __name__ == '__main__':
         print("Usage: python incremental_bandwidth_solver.py [mtx_file] [solver]")
         print()
         print("Arguments:")
-        print("  mtx_file: Name of MTX file (searches in mtx/group 1/, mtx/group 2/, and mtx/group 3/)")
+        print("  mtx_file: Name of MTX file (searches in mtx/group 1/, mtx/group 2/, and mtx/group 3/, and mtx/regular/)")
         print("  solver: SAT solver to use (glucose42 or cadical195, default: glucose42)")
         print()
         print("Examples:")
@@ -811,7 +782,7 @@ if __name__ == '__main__':
         print("Features:")
         print("  - Monotone strengthening: persistent solver with learnt clause reuse")
         print("  - Smart jumping: use actual bandwidth to skip impossible K values")
-        print("  - Symmetry breaking: reduce search space significantly")
+        print("  - Exact solving: no symmetry breaking for maximum accuracy")
         print("  - Incremental interface: maximum performance with minimal overhead")
         print()
         print("Available MTX files:")
@@ -820,6 +791,7 @@ if __name__ == '__main__':
         print("           9.jgl011.mtx, 10.lap_25.mtx, 11.pores_1.mtx, 12.rgg010.mtx")
         print("  Group 2: 1.ash85.mtx")
         print("  Group 3: Various larger matrices including ck104.mtx, bcsstk04.mtx, etc.")
+        print("  Regular: Various regular matrices")
         print()
         print("Running built-in incremental SAT test cases...")
         test_incremental_bandwidth_solver()
