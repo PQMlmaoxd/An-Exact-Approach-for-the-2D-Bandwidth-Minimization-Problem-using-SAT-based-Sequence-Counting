@@ -12,7 +12,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from incremental_bandwidth_solver import IncrementalBandwidthSolver
+from incremental_bandwidth_solver import IncrementalBandwidthSolver, calculate_theoretical_upper_bound
 
 
 def parse_mtx_file(filename: str) -> Tuple[int, List[Tuple[int,int]]]:
@@ -159,7 +159,7 @@ def extract_and_verify_from_model(model: List[int], solver: IncrementalBandwidth
 
 
 def incremental_validate(mtx_file: str, solver_type: str, K: int) -> Dict:
-    print(f"INCREMENTAL VALIDATOR: file={mtx_file}, solver={solver_type}, K={K}")
+    print(f"INCREMENTAL VALIDATOR (incremental solve): file={mtx_file}, solver={solver_type}, target_K={K}")
 
     if not os.path.exists(mtx_file):
         search_paths = [
@@ -194,32 +194,97 @@ def incremental_validate(mtx_file: str, solver_type: str, K: int) -> Dict:
 
     # Initialize persistent solver and add base constraints
     solver._initialize_persistent_solver()
+    # Monotone incremental loop: start from theoretical UB and go down
+    theoretical_ub = calculate_theoretical_upper_bound(n)
+    start_k = theoretical_ub
+    if start_k < K:
+        start_k = K
 
-    # Build bandwidth clauses (using same thermometer logic as validator)
-    bandwidth_clauses = encode_thermometer_bandwidth_clauses(solver.Tx_vars, solver.Ty_vars, K)
-    print(f"Adding {len(bandwidth_clauses)} bandwidth clauses for K={K}")
-    for c in bandwidth_clauses:
-        solver.persistent_solver.add_clause(c)
+    print(f"Starting incremental solve from K={start_k} down to target K={K}")
 
-    # Solve
-    t0 = time.time()
-    is_sat = solver.persistent_solver.solve()
-    solve_time = time.time() - t0
+    added_clauses = set()  # track added clauses to avoid duplicates
+    result_info = {
+        'reached_target': False,
+        'is_sat_at_target': False,
+        'solve_time_at_target': None,
+        'model_at_target': None,
+        'solution_info_at_target': None,
+        'last_sat_model': None,
+        'last_sat_k': None
+    }
 
-    model = None
-    solution_info = None
-    if is_sat:
-        model = solver.persistent_solver.get_model()
-        solution_info = extract_and_verify_from_model(model, solver, K)
+    current_k = start_k
+    total_start = time.time()
+    while current_k >= K:
+        print(f"\nTesting K = {current_k} (incremental)")
 
-    # Clean up
+        # generate clauses for this K only
+        clauses_k = encode_thermometer_bandwidth_clauses(solver.Tx_vars, solver.Ty_vars, current_k)
+        new_added = 0
+        for cl in clauses_k:
+            tcl = tuple(cl)
+            if tcl not in added_clauses:
+                solver.persistent_solver.add_clause(cl)
+                added_clauses.add(tcl)
+                new_added += 1
+        print(f"  Added {new_added} new bandwidth clauses for K={current_k}")
+
+        # Solve at this K
+        t0 = time.time()
+        is_sat = solver.persistent_solver.solve()
+        solve_time = time.time() - t0
+        print(f"  Solve result: {'SAT' if is_sat else 'UNSAT'} in {solve_time:.3f}s")
+
+        if is_sat:
+            model = solver.persistent_solver.get_model()
+            # decode and compute actual bandwidth
+            sol_info = extract_and_verify_from_model(model, solver, current_k)
+            actual_bw = sol_info.get('actual_bandwidth')
+            print(f"  Actual bandwidth from model: {actual_bw}")
+            result_info['last_sat_model'] = model
+            result_info['last_sat_k'] = current_k
+
+            # If we've reached target K, record and return SAT info
+            if current_k == K:
+                result_info['reached_target'] = True
+                result_info['is_sat_at_target'] = True
+                result_info['solve_time_at_target'] = solve_time
+                result_info['model_at_target'] = model
+                result_info['solution_info_at_target'] = sol_info
+                break
+
+            # smart jump: if actual_bw < current_k, jump to actual_bw - 1
+            if actual_bw is not None and actual_bw < current_k:
+                jump_to = max(actual_bw - 1, K)
+                print(f"  Smart jump: actual_bw={actual_bw}, next K={jump_to}")
+                current_k = jump_to
+                continue
+            else:
+                current_k -= 1
+                continue
+        else:
+            # UNSAT at this K — if this equals target K, we reached it as UNSAT
+            if current_k == K:
+                result_info['reached_target'] = True
+                result_info['is_sat_at_target'] = False
+                result_info['solve_time_at_target'] = solve_time
+                break
+            current_k -= 1
+
+    total_time = time.time() - total_start
+
+    # Cleanup solver
     solver.cleanup_solver()
 
+    # Return target result (SAT/UNSAT) if reached, otherwise report last known
     return {
-        'is_sat': is_sat,
-        'solve_time': solve_time,
-        'model': model,
-        'solution_info': solution_info
+        'reached_target': result_info['reached_target'],
+        'is_sat_at_target': result_info['is_sat_at_target'],
+        'solve_time_at_target': result_info['solve_time_at_target'],
+        'model_at_target': result_info['model_at_target'],
+        'solution_info_at_target': result_info['solution_info_at_target'],
+        'total_time': total_time,
+        'last_sat_k': result_info['last_sat_k']
     }
 
 
@@ -238,11 +303,24 @@ if __name__ == '__main__':
 
     res = incremental_validate(mtx_file, solver_type, K)
     print("\nRESULT:")
-    print(f"  is_sat: {res['is_sat']}")
-    print(f"  solve_time: {res['solve_time']:.3f}s")
+    reached = res.get('reached_target', False)
+    is_sat = res.get('is_sat_at_target', False)
+    solve_time = res.get('solve_time_at_target')
+    last_sat_k = res.get('last_sat_k')
+    total_time = res.get('total_time', 0.0)
 
-    if res['is_sat']:
-        info = res.get('solution_info')
+    print(f"  reached_target: {reached}")
+    print(f"  is_sat_at_target: {is_sat}")
+    if solve_time is not None:
+        print(f"  solve_time_at_target: {solve_time:.3f}s")
+    else:
+        print("  solve_time_at_target: N/A")
+    if last_sat_k is not None:
+        print(f"  last_sat_k: {last_sat_k}")
+    print(f"  total_time: {total_time:.3f}s")
+
+    if is_sat:
+        info = res.get('solution_info_at_target')
         if info is None:
             print("  Note: SAT model found but no solution info available")
         else:
@@ -257,19 +335,20 @@ if __name__ == '__main__':
             print("-" * 50)
             print(f"Extracted positions: {len(positions)} vertices")
 
-            # Show vertex positions (first 20)
-            max_show = min(20, len(positions))
-            for v in sorted(list(positions.keys())[:max_show]):
+            # Show all vertex positions
+            for v in sorted(positions.keys()):
                 x, y = positions[v]
                 print(f"  v{v}: ({x}, {y})")
-            if len(positions) > max_show:
-                print(f"  ... and {len(positions) - max_show} more vertices")
 
-            # Show edge distances
+            # Show edge distances with expanded Manhattan expression
             print(f"\nEdge distances ({len(edge_distances)} edges):")
             for u, v, distance in edge_distances:
                 marker = "ok" if distance <= K else "exceeds"
-                print(f"  ({u},{v}): {distance} [{marker}]")
+                # Expand the Manhattan distance expression using vertex positions
+                x1, y1 = positions[u]
+                x2, y2 = positions[v]
+                expr = f"|{x1} - {x2}| + |{y1} - {y2}|"
+                print(f"  ({u},{v}) = {expr} = {distance} [{marker}]")
 
             print(f"\nBandwidth summary:")
             print(f"  Actual: {actual_bw}")
@@ -277,4 +356,4 @@ if __name__ == '__main__':
             print(f"  Valid:  {'Yes' if is_valid else 'No'}")
             print(f"  Edges within limit: {sum(1 for _, _, d in edge_distances if d <= K)}/{len(edge_distances)}")
 
-    sys.exit(0 if res['is_sat'] else 2)
+    sys.exit(0 if is_sat else 2)
