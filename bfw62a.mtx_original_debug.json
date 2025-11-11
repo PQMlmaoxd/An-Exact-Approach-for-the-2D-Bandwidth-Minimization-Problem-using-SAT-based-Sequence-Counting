@@ -1,0 +1,20 @@
+{
+  "solver_name": "Original",
+  "n": 62,
+  "edges": 200,
+  "ub": 0,
+  "optimal": null,
+  "position_stats": {},
+  "distance_stats": {
+    "activation": 1512800,
+    "deactivation": 1536800,
+    "monotonic": 24000,
+    "base": 0,
+    "mutual_exclusion": 0,
+    "total": 4510884,
+    "t_variables": 24400
+  },
+  "k_stats": [],
+  "total_encoding_time": 1.3775432109832764,
+  "total_solve_time": 0.0
+}

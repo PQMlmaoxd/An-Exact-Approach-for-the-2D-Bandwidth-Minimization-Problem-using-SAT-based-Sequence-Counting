@@ -7,6 +7,9 @@ from pysat.solvers import Glucose42, Cadical195, Solver
 import time
 import sys
 import os
+import gc
+import ctypes
+import math
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from distance_encoder import encode_abs_distance_final
@@ -32,7 +35,6 @@ def calculate_theoretical_upper_bound(n):
     Returns:
         Theoretical upper bound for bandwidth
     """
-    import math
     
     # Handle special cases
     if n <= 0:
@@ -127,29 +129,91 @@ class IncrementalBandwidthSolver:
         Position constraints: each vertex gets exactly one position on each axis
         Each position can have at most one vertex
         Uses Sequential Counter encoding for O(n²) complexity
+        
+        STREAMING APPROACH: Add clauses directly to solver instead of accumulating in memory
         """
-        return encode_all_position_constraints(self.n, self.X_vars, self.Y_vars, self.vpool)
+        print(f"Encoding position constraints...")
+        encode_start_time = time.time()
+        
+        # Generate constraints and stream directly to solver
+        constraints = encode_all_position_constraints(self.n, self.X_vars, self.Y_vars, self.vpool)
+        
+        # Stream position clauses directly to solver (no intermediate storage)
+        clauses_added = 0
+        for clause in constraints:
+            self.persistent_solver.add_clause(clause)
+            clauses_added += 1
+        
+        encode_time = time.time() - encode_start_time
+        print(f"Generated {clauses_added} position constraint clauses")
+        print(f"Position constraints encode time: {encode_time:.3f}s")
+        print(f"Memory optimization: Position clauses streamed directly to solver")
+        
+        # Add solver stats after position constraints
+        vars_after = self.persistent_solver.nof_vars()
+        clauses_after = self.persistent_solver.nof_clauses()
+        print(f"  Solver stats after position: vars={vars_after}, clauses={clauses_after}")
+        
+        # >>> THÊM 3 DÒNG METRIC CHUẨN HOÁ
+        print(f"METRIC: position_encode_time_s={encode_time:.6f}")
+        print(f"METRIC: position_solver_vars={vars_after}")
+        print(f"METRIC: position_solver_clauses={clauses_after}")
+        
+        # Return count only, not clause list
+        return clauses_added
     
     def encode_distance_constraints(self):
-        """Encode distance constraints for each edge"""
+        """
+        Encode distance constraints and log ONLY:
+          - distance encoding time (seconds)
+          - solver vars/clauses AFTER distance
+        No estimates, no per-edge counts, no deltas.
+        """
+        print("Encoding distance constraints...")
+
+        # time start
+        t0 = time.time()
+
         clauses = []
-        
         for edge_id, (u, v) in zip([f'edge_{u}_{v}' for u, v in self.edges], self.edges):
             # X distance encoding
             Tx_vars, Tx_clauses = encode_abs_distance_final(
                 self.X_vars[u], self.X_vars[v], self.n, self.vpool, f"Tx_{edge_id}"
             )
             self.Tx_vars[edge_id] = Tx_vars
-            clauses.extend(Tx_clauses)
             
+            # Stream X distance clauses directly to solver
+            for c in Tx_clauses:
+                self.persistent_solver.add_clause(c)
+            Tx_clauses.clear(); del Tx_clauses
+
             # Y distance encoding
             Ty_vars, Ty_clauses = encode_abs_distance_final(
                 self.Y_vars[u], self.Y_vars[v], self.n, self.vpool, f"Ty_{edge_id}"
             )
             self.Ty_vars[edge_id] = Ty_vars
-            clauses.extend(Ty_clauses)
-        
-        return clauses
+            
+            # Stream Y distance clauses directly to solver
+            for c in Ty_clauses:
+                self.persistent_solver.add_clause(c)
+            Ty_clauses.clear(); del Ty_clauses
+
+        enc_time = time.time() - t0
+
+        # absolute stats from solver (no deltas)
+        vars_after = self.persistent_solver.nof_vars()
+        cls_after  = self.persistent_solver.nof_clauses()
+
+        print(f"Distance encoding time: {enc_time:.3f}s")
+        print(f"Solver stats after distance: vars={vars_after}, clauses={cls_after}")
+
+        # >>> THÊM 3 DÒNG METRIC CHUẨN HOÁ
+        print(f"METRIC: distance_encode_time_s={enc_time:.6f}")
+        print(f"METRIC: distance_solver_vars={vars_after}")
+        print(f"METRIC: distance_solver_clauses={cls_after}")
+
+        # optional: return encoding time
+        return enc_time
     
     def _create_solver(self):
         """Create SAT solver instance"""
@@ -170,6 +234,7 @@ class IncrementalBandwidthSolver:
         - Distance constraints (Manhattan distance encoding)
         
         These constraints are K-independent and added once.
+        Uses streaming approach to minimize peak RAM usage.
         """
         if self.persistent_solver is not None:
             print("Persistent solver already initialized")
@@ -177,30 +242,36 @@ class IncrementalBandwidthSolver:
         
         print(f"\nInitializing persistent solver with base constraints...")
         print(f"Using {self.solver_type.upper()} with incremental interface")
+        print(f"Streaming approach: add clauses immediately to reduce peak RAM")
         
         self.persistent_solver = self._create_solver()
         
-        # Add position constraints
+        # Stream position constraints (add directly, no intermediate list)
         print(f"  Adding position constraints...")
-        position_clauses = self.encode_position_constraints()
-        print(f"    Position: {len(position_clauses)} clauses")
+        initialization_start_time = time.time()
+        total_position_clauses = self.encode_position_constraints()
+        print(f"    Position: {total_position_clauses} clauses")
         
-        for clause in position_clauses:
-            self.persistent_solver.add_clause(clause)
-        
-        # Add distance constraints  
+        # Stream distance constraints (add directly, no intermediate list)
         print(f"  Adding distance constraints...")
-        distance_clauses = self.encode_distance_constraints()
-        print(f"    Distance: {len(distance_clauses)} clauses")
+        _ = self.encode_distance_constraints()  # hàm đã in time + solver stats
         
-        for clause in distance_clauses:
-            self.persistent_solver.add_clause(clause)
+        total_initialization_time = time.time() - initialization_start_time
+        print(f"  Total base constraints encoding time: {total_initialization_time:.3f}s")
         
-        total_base_clauses = len(position_clauses) + len(distance_clauses)
-        print(f"  Total base constraints: {total_base_clauses} clauses")
+        # Force garbage collection and memory trim to reduce peak RAM
+        print(f"  Forcing garbage collection and memory trim...")
+        gc.collect()
+        try:
+            # Try to trim memory on Linux systems
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            # Not available on all systems, silently continue
+            pass
         
         self.base_constraints_added = True
-        print(f"Persistent solver initialized and ready for incremental solving")
+        print(f"Persistent solver initialized with streaming approach")
+        print(f"Base constraints added and memory optimized")
     
     def encode_bandwidth_constraints_for_k(self, K):
         """
@@ -219,6 +290,7 @@ class IncrementalBandwidthSolver:
         edges_processed = 0
         
         print(f"  Encoding NEW bandwidth constraints for K={K}...")
+        encode_start_time = time.time()
         
         for edge_id in self.Tx_vars:
             Tx = self.Tx_vars[edge_id]  # Tx[i] means Tx >= i+1
@@ -235,26 +307,35 @@ class IncrementalBandwidthSolver:
                 clause = [-Ty[K]]
                 new_clauses.append(clause)
             
-            # Implication: Tx >= i → Ty <= K-i
+            # Implication constraints: BOTH DIRECTIONS for symmetry
+            # Direction 1: Tx >= i → Ty <= K-i
+            # Direction 2: Ty >= i → Tx <= K-i
             for i in range(1, K + 1):
-                if K - i >= 0:
-                    tx_geq_i = None
-                    ty_leq_ki = None
+                remaining = K - i
+                if remaining >= 0:
+                    # Direction 1: Tx >= i → Ty <= K-i
+                    # (Tx >= i) → (Ty <= K-i) ≡ ¬(Tx >= i) ∨ ¬(Ty >= K-i+1)
+                    if i-1 < len(Tx) and remaining < len(Ty):
+                        tx_geq_i = Tx[i-1]        # Tx >= i
+                        ty_geq_rem_plus1 = Ty[remaining]  # Ty >= (K-i)+1
+                        clause = [-tx_geq_i, -ty_geq_rem_plus1]
+                        new_clauses.append(clause)
                     
-                    if i-1 < len(Tx):
-                        tx_geq_i = Tx[i-1]  # Tx >= i
-                    
-                    if K-i < len(Ty):
-                        ty_leq_ki = -Ty[K-i]  # Ty <= K-i (negated)
-                    
-                    if tx_geq_i is not None and ty_leq_ki is not None:
-                        clause = [-tx_geq_i, ty_leq_ki]
+                    # Direction 2: Ty >= i → Tx <= K-i (SYMMETRY - was MISSING!)
+                    # (Ty >= i) → (Tx <= K-i) ≡ ¬(Ty >= i) ∨ ¬(Tx >= K-i+1)
+                    if i-1 < len(Ty) and remaining < len(Tx):
+                        ty_geq_i = Ty[i-1]        # Ty >= i
+                        tx_geq_rem_plus1 = Tx[remaining]  # Tx >= (K-i)+1
+                        clause = [-ty_geq_i, -tx_geq_rem_plus1]
                         new_clauses.append(clause)
         
         # Mark this K as processed
         self.current_k_constraints.add(K)
         
+        encode_time = time.time() - encode_start_time
         print(f"  Generated {len(new_clauses)} NEW bandwidth clauses for {edges_processed} edges, K={K}")
+        print(f"  Bandwidth constraints (K={K}) encode time: {encode_time:.3f}s")
+        
         return new_clauses
     
     def _extract_positions_from_model(self, model):
@@ -349,6 +430,7 @@ class IncrementalBandwidthSolver:
             print(f"Adjusted upper bound from {upper_bound} to {current_k} (theoretical limit)")
         
         optimal_k = None
+        cumulative_solve_time = 0.0  # Track total SAT solve time
         solver_stats = {
             'total_solves': 0,
             'sat_results': 0,
@@ -365,11 +447,15 @@ class IncrementalBandwidthSolver:
             print(f"  Adding constraints for K={current_k}...")
             bandwidth_clauses = self.encode_bandwidth_constraints_for_k(current_k)
             
-            # Add new constraints to persistent solver
+            # Stream K-specific constraints to persistent solver
             for clause in bandwidth_clauses:
                 self.persistent_solver.add_clause(clause)
             
-            solver_stats['clauses_added'] += len(bandwidth_clauses)
+            # Clear bandwidth clauses to reduce memory
+            clause_count = len(bandwidth_clauses)
+            solver_stats['clauses_added'] += clause_count
+            bandwidth_clauses.clear()
+            del bandwidth_clauses
             
             # Get solver statistics
             solve_start = time.time()
@@ -379,6 +465,7 @@ class IncrementalBandwidthSolver:
             result = self.persistent_solver.solve()
             
             solve_time = time.time() - solve_start
+            cumulative_solve_time += solve_time
             print(f"  Solve time: {solve_time:.3f}s")
             
             if result:
@@ -392,6 +479,12 @@ class IncrementalBandwidthSolver:
                 actual_bandwidth = self.extract_actual_bandwidth(model)
                 
                 print(f"  Actual bandwidth from solution: {actual_bandwidth}")
+                
+                # >>> THÊM METRIC logging cho best K found và solve timing
+                print(f"METRIC: best_k_so_far={actual_bandwidth}")
+                print(f"METRIC: sat_at_k={current_k}")
+                print(f"METRIC: sat_solve_time_s={solve_time:.6f}")
+                print(f"METRIC: cumulative_solve_time_s={cumulative_solve_time:.6f}")
                 
                 # Smart jumping based on actual bandwidth
                 if actual_bandwidth < current_k:

@@ -1,0 +1,17 @@
+filename,n,E,status,K,UB,solve time(s),solver,2025 K,time solve(s)
+1.ck104.mtx,104,992,TO,3(SAT),14,1200,cadical195,3-91,2
+2.bcsstk03.mtx,112,376,SOLVED,2,14,114.03,cadical195,3-1,0.4
+3.gent113.mtx,113,655,TO,6(SAT),14,1200,cadical195,5-64,3.07
+4.gre__115.mtx,115,421,TO,4(SAT),15,1200,cadical195,4-2,0.84
+5.bcspwr03.mtx,118,297,SOLVED,2,15,221.8,cadical195,2-109,0.32
+6.arc130.mtx,130,1282,TO,9(SAT),16,1200,cadical195,9-13,4.06
+7.lns__131.mtx,131,536,TO,3(SAT),16,1200,cadical195,3-47,1.83
+8.lnsp_131.mtx,131,536,TO,3(SAT),16,1200,cadical195,3-42,1.89
+10.bcsstk04.mtx,132,1890,MEM EXCEED,-1,16,0,cadical195,8-28,0.38
+9.west0132.mtx,132,414,TO,6(SAT),16,1200,cadical195,5-108,6.75
+11.rw136.mtx,136,479,SOLVED,2,16,483.3,cadical195,3-40,2.57
+12.impcol_c.mtx,137,411,TO,5(SAT),16,1200,cadical195,5-2,0.83
+13.bcsstk22.mtx,138,417,SOLVED,2,16,462,cadical195,3-1,0.48
+14.can__144.mtx,144,720,TO,3(SAT),16,1200,cadical195,3-143,0.53
+15.lund_a.mtx,147,1298,TO,5(SAT),17,1200,cadical195,5-4,1.15
+16.lund_b.mtx,147,1294,TO,5(SAT),17,1200,cadical195,5-6,1.19

@@ -1,0 +1,5 @@
+filename,n,E,status,K,UB,solve time(s),solver,20205 K,LB
+dwt__162.mtx,162,672,SOLVED,2,17,818.94,cadical195,3,1
+west0156.mtx,156,371,TO,7(SAT),17,1200,cadical195,5,3
+west0167.mtx,167,507,TO,6(SAT),18,1200,cadical195,5,3
+will199.mtx,199,701,TO,11(SAT),19,1200,cadical195,7,4

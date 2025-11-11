@@ -1,0 +1,22 @@
+filename,n,E,status,K,UB,solve time(s),solver,2025 K,solve time(s)
+curtis54.mtx,54,291,SOLVED,3,10,395.97,cadical195,3-6,0.18
+will57.mtx,57,281,SOLVED,3,10,435.35,cadical195,3-5,0.13
+dwt___59.mtx,59,163,SOLVED,2,10,10.93,cadical195,2-33,0.44
+impcol_b.mtx,59,312,TO,5(SAT),10,1200,cadical195,5-4,0.31
+can___61.mtx,61,309,TO,4(SAT),10,1200,cadical195,4-9,0.24
+bfw62a.mtx,62,450,SOLVED,3,11,476.97,cadical195,4-1,0.2
+bfw62b.mtx,62,342,TO,3(SAT),11,1200,cadical195,3-14,0.26
+bcsstk02.mtx,66,2211,TO,11(SAT),11,1200,cadical195,12-9,0.17
+can___62.mtx,62,140,SOLVED,2,11,151.18,cadical195,2-19,3x10^-4
+dwt___66.mtx,66,193,SOLVED,2,11,18.17,cadical195,2-36,0.5
+west0067.mtx,67,294,TO,5(SAT),11,1200,cadical195,5-30 ,1.11
+dwt___72.mtx,72,147,SOLVED,1,11,24.63,cadical195,2-1,0.3
+can___73.mtx,73,225,TO,3(SAT),12,1200,cadical195,3-32,0.79
+steam3.mtx,80,928,TO,3(SAT),12,1200,cadical195,4-31,0.41
+ash85.mtx,85,304,SOLVED,2,12,56.64,cadical195,2-103,7.87
+dwt___87.mtx,87,314,TO,3(SAT),13,1200,cadical195,3-27,1.08
+tols90.mtx,90,1746,TO,10(SAT),13,1200,cadical195,10-22,6x10^-4
+can___96.mtx,96,432,TO,3(SAT),13,1200,cadical195,3-61,1.58
+olm100.mtx,100,396,SOLVED,2,14,59.15,cadical195,3-38 ,1.13
+tub100.mtx,100,396,SOLVED,1,14,11.54,cadical195,2-53,1.01
+nos4.mtx,100,347,SOLVED,2,14,128.53,cadical195,2–8 ,0.84

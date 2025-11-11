@@ -1,0 +1,7 @@
+filename,UB,solver,status,LB
+ash219.mtx,20,glucose42,SAT,3
+nos1.mtx,18,cadical195,SAT,1
+west0156.mtx,22,glucose42,SAT,4
+can__161.mtx,25,cadical195,SAT,3
+can__229.mtx,30,glucose42,SAT,3
+bcsstk05.mtx,28,cadical195,SAT,3

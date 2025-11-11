@@ -7,6 +7,8 @@ from pysat.solvers import Glucose42, Cadical195, Solver
 import time
 import sys
 import os
+import gc
+import ctypes
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from distance_encoder import encode_abs_distance_final
@@ -270,10 +272,12 @@ class NonIncrementalBandwidthSolver:
     def solve_for_k(self, K):
         """
         Solve bandwidth minimization for specific K value using fresh solver
+        Uses streaming approach to minimize peak RAM usage.
         
         Returns: (is_sat, actual_bandwidth, solve_time, model)
         """
         print(f"\nTesting K = {K} (fresh solver)")
+        print(f"Using streaming approach to minimize peak RAM")
         
         # Create fresh variables for this K
         vpool, X_vars, Y_vars, Tx_vars, Ty_vars = self.create_variables_for_k(K)
@@ -281,29 +285,42 @@ class NonIncrementalBandwidthSolver:
         # Create fresh solver
         solver = self._create_solver()
         
-        # Add position constraints
+        # Stream position constraints (add and clear immediately)
         print(f"  Adding position constraints...")
         position_clauses = self.encode_position_constraints(X_vars, Y_vars, vpool)
+        print(f"    Position: {len(position_clauses)} clauses")
+        
         for clause in position_clauses:
             solver.add_clause(clause)
+        position_clauses.clear()
+        del position_clauses
         
-        # Add distance constraints  
+        # Stream distance constraints (add and clear immediately)
         print(f"  Adding distance constraints...")
         distance_clauses = self.encode_distance_constraints(X_vars, Y_vars, Tx_vars, Ty_vars, vpool)
+        print(f"    Distance: {len(distance_clauses)} clauses")
+        
         for clause in distance_clauses:
             solver.add_clause(clause)
+        distance_clauses.clear()
+        del distance_clauses
         
-        # Add bandwidth constraints
+        # Stream bandwidth constraints (add and clear immediately)
         print(f"  Adding bandwidth constraints...")
         bandwidth_clauses = self.encode_bandwidth_constraints(Tx_vars, Ty_vars, K)
+        print(f"    Bandwidth: {len(bandwidth_clauses)} clauses")
+        
         for clause in bandwidth_clauses:
             solver.add_clause(clause)
+        bandwidth_clauses.clear()
+        del bandwidth_clauses
         
-        total_clauses = len(position_clauses) + len(distance_clauses) + len(bandwidth_clauses)
-        print(f"  Total clauses: {total_clauses}")
-        print(f"    Position: {len(position_clauses)}")
-        print(f"    Distance: {len(distance_clauses)}")
-        print(f"    Bandwidth: {len(bandwidth_clauses)}")
+        # Force garbage collection and memory trim
+        gc.collect()
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
         
         # Solve
         print(f"  Solving with fresh {self.solver_type.upper()}...")

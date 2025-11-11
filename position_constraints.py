@@ -9,22 +9,25 @@ def encode_vertex_position_constraints(n, X_vars, Y_vars, vpool):
     Each vertex gets exactly one X and Y position
     
     Uses Sequential Counter exactly-k encoding for efficient constraint generation.
+    MEMORY OPTIMIZED: Yields clauses one by one instead of accumulating in list.
     """
-    clauses = []
-    
     print(f"Encoding vertex position constraints for {n} vertices...")
+    clause_count = 0
     
     for v in range(1, n + 1):
         # Exactly-One for X using Sequential Counter
         sc_x_clauses = CardEnc.equals(X_vars[v], 1, vpool=vpool, encoding=EncType.seqcounter)
-        clauses.extend(sc_x_clauses.clauses)
+        for clause in sc_x_clauses.clauses:
+            yield clause
+            clause_count += 1
         
         # Exactly-One for Y using Sequential Counter
         sc_y_clauses = CardEnc.equals(Y_vars[v], 1, vpool=vpool, encoding=EncType.seqcounter)
-        clauses.extend(sc_y_clauses.clauses)
+        for clause in sc_y_clauses.clauses:
+            yield clause
+            clause_count += 1
     
-    print(f"Generated {len(clauses)} clauses for vertex position constraints")
-    return clauses
+    print(f"Generated {clause_count} clauses for vertex position constraints")
 
 def encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool):
     """
@@ -32,10 +35,10 @@ def encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool):
     
     Creates indicator variables and uses Sequential Counter at-most-k encoding
     for O(n²) complexity per position.
+    MEMORY OPTIMIZED: Yields clauses one by one instead of accumulating in list.
     """
-    clauses = []
-    
     print(f"Encoding position uniqueness for {n}x{n} grid...")
+    clause_count = 0
     
     # Each position (x,y) has at most one vertex
     for x in range(n):
@@ -48,18 +51,22 @@ def encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool):
                 
                 # Equivalence: indicator ↔ (X_v_x ∧ Y_v_y)
                 # indicator → X_v_x
-                clauses.append([-indicator, X_vars[v][x]])
+                yield [-indicator, X_vars[v][x]]
+                clause_count += 1
                 # indicator → Y_v_y
-                clauses.append([-indicator, Y_vars[v][y]])
+                yield [-indicator, Y_vars[v][y]]
+                clause_count += 1
                 # (X_v_x ∧ Y_v_y) → indicator
-                clauses.append([indicator, -X_vars[v][x], -Y_vars[v][y]])
+                yield [indicator, -X_vars[v][x], -Y_vars[v][y]]
+                clause_count += 1
             
             # Sequential Counter constraint: at most 1 node at position (x,y)
             sc_at_most_1 = CardEnc.atmost(node_indicators, 1, vpool=vpool, encoding=EncType.seqcounter)
-            clauses.extend(sc_at_most_1.clauses)
+            for clause in sc_at_most_1.clauses:
+                yield clause
+                clause_count += 1
     
-    print(f"Generated {len(clauses)} clauses for position uniqueness")
-    return clauses
+    print(f"Generated {clause_count} clauses for position uniqueness")
 
 def encode_all_position_constraints(n, X_vars, Y_vars, vpool):
     """
@@ -68,21 +75,19 @@ def encode_all_position_constraints(n, X_vars, Y_vars, vpool):
     Combines vertex position constraints (exactly-one) with
     position uniqueness constraints (at-most-one).
     Uses Sequential Counter encoding for efficient constraint generation.
+    MEMORY OPTIMIZED: Generator that yields clauses one by one instead of returning huge list.
     """
     print(f"\nEncoding position constraints")
     print(f"Problem: {n} vertices on {n}x{n} grid")
+    print(f"Memory optimization: Streaming clauses via generator (no intermediate list)")
     
-    all_clauses = []
+    # 1. Vertex position constraints (exactly-one) - stream via generator
+    for clause in encode_vertex_position_constraints(n, X_vars, Y_vars, vpool):
+        yield clause
     
-    # 1. Vertex position constraints (exactly-one)
-    vertex_clauses = encode_vertex_position_constraints(n, X_vars, Y_vars, vpool)
-    all_clauses.extend(vertex_clauses)
-    
-    # 2. Position uniqueness constraints (at-most-one)
-    uniqueness_clauses = encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool)
-    all_clauses.extend(uniqueness_clauses)
-    
-    return all_clauses
+    # 2. Position uniqueness constraints (at-most-one) - stream via generator
+    for clause in encode_position_uniqueness_constraints(n, X_vars, Y_vars, vpool):
+        yield clause
 
 def create_position_variables(n, vpool):
     """
@@ -108,6 +113,7 @@ def create_position_variables(n, vpool):
 def test_position_constraints():
     """
     Test position constraints with small example
+    MEMORY OPTIMIZED: Works with generator to stream clauses directly to solver
     """
     from pysat.solvers import Glucose4
     
@@ -119,15 +125,19 @@ def test_position_constraints():
     # Create position variables
     X_vars, Y_vars = create_position_variables(n, vpool)
     
-    # Encode all position constraints
-    clauses = encode_all_position_constraints(n, X_vars, Y_vars, vpool)
+    # Encode all position constraints (generator - no intermediate list)
+    clause_generator = encode_all_position_constraints(n, X_vars, Y_vars, vpool)
     
-    print(f"\nTesting with {len(clauses)} clauses...")
+    print(f"\nTesting with streaming clauses...")
     
-    # Test with SAT solver
+    # Test with SAT solver - stream clauses directly
     solver = Glucose4()
-    for clause in clauses:
+    clause_count = 0
+    for clause in clause_generator:
         solver.add_clause(clause)
+        clause_count += 1
+    
+    print(f"Total clauses added: {clause_count}")
     
     if solver.solve():
         model = solver.get_model()
@@ -156,7 +166,7 @@ def test_position_constraints():
         print("UNSAT: Position constraints are unsatisfiable - ERROR!")
     
     solver.delete()
-    print("Position constraints test complete")
+    print("Position constraints test complete (memory optimized)")
 
 if __name__ == '__main__':
     test_position_constraints()

@@ -1,0 +1,6 @@
+filename,UB,solver,time,status
+can___24.mtx,10,glucose42,0.5,SAT
+jgl009.mtx,8,cadical195,0.3,SAT
+ash85.mtx,25,glucose42,2.1,SAT
+bcsstk01.mtx,12,cadical195,1.2,SAT
+14.can__144.mtx,30,glucose42,5.4,SAT

@@ -1,0 +1,13 @@
+filename,n,E,status,K,UB,solve time(s),solver,2025 K,2025 solve time(s)
+jgl009.mtx,9,50,SOLVED,3,4,1.69,cadical195,3–6,8x10^-4
+rgg010.mtx,10,76,SOLVED,4,4,636.02,cadical195,4–4,9x10^-3
+jgl011.mtx,11,76,SOLVED,4,4,653.91,cadical195,4–4,8x10^-4
+can___24.mtx,24,92,SOLVED,2,6,1.74,cadical195,3–3,7x10^-3
+lap_25.mtx,25,97,SOLVED,2,6,1.7,cadical195,2–32,0.08
+fidap005.mtx,27,279,TO,4(SAT),7,1200,cadical195,4–5,7x10^-4
+pores_1.mtx,30,180,SOLVED,3,7,102.5,cadical195,3–10,0.09
+ibm32.mtx,32,126,SOLVED,3,7,417.1,cadical195,4–41,0.05
+bcspwr01.mtx,39,85,SOLVED,2,8,2.64,cadical195,2–4,0.09
+fidapm05.mtx,42,520,TO,4(SAT),9,1200,cadical195,4–23,0.21
+bcsstk01.mtx,48,224,TO,4(SAT),9,1200,cadical195,4–24,0.15
+bcspwr02.mtx,49,108,SOLVED,2,9,14.67,cadical195,2–13,0.22
