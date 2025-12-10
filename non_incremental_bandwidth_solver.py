@@ -163,7 +163,15 @@ class NonIncrementalBandwidthSolver:
         """
         Encode bandwidth <= K constraints
         
-        For each edge: (Tx<=K) ∧ (Ty<=K) ∧ (Tx>=i → Ty<=K-i)
+        For each edge: (Tx<=K) ∧ (Ty<=K) ∧ (Tx>=i → Ty<=K-i) ∧ (Ty>=i → Tx<=K-i)
+        
+        The constraint Tx + Ty <= K is encoded as:
+        - Direct bounds: Tx <= K, Ty <= K
+        - Symmetric implications: 
+          * Tx >= i → Ty <= K-i (if Tx is at least i, Ty must be at most K-i)
+          * Ty >= i → Tx <= K-i (if Ty is at least i, Tx must be at most K-i)
+        
+        IMPORTANT: Both directions are needed for correctness!
         """
         clauses = []
         edges_processed = 0
@@ -183,20 +191,24 @@ class NonIncrementalBandwidthSolver:
                 clause = [-Ty[K]]
                 clauses.append(clause)
             
-            # Implication: Tx >= i → Ty <= K-i
+            # Symmetric implications for Tx + Ty <= K
             for i in range(1, K + 1):
-                if K - i >= 0:
-                    tx_geq_i = None
-                    ty_leq_ki = None
+                remaining = K - i
+                if remaining >= 0:
+                    # Direction 1: Tx >= i → Ty <= remaining
+                    # Equivalent: ¬(Tx >= i) ∨ ¬(Ty >= remaining+1)
+                    if i - 1 < len(Tx) and remaining < len(Ty):
+                        tx_geq_i = Tx[i - 1]           # Tx >= i
+                        ty_geq_rem_plus1 = Ty[remaining]  # Ty >= remaining+1
+                        clause = [-tx_geq_i, -ty_geq_rem_plus1]
+                        clauses.append(clause)
                     
-                    if i-1 < len(Tx):
-                        tx_geq_i = Tx[i-1]  # Tx >= i
-                    
-                    if K-i < len(Ty):
-                        ty_leq_ki = -Ty[K-i]  # Ty <= K-i (negated)
-                    
-                    if tx_geq_i is not None and ty_leq_ki is not None:
-                        clause = [-tx_geq_i, ty_leq_ki]
+                    # Direction 2: Ty >= i → Tx <= remaining (SYMMETRIC - CRITICAL!)
+                    # Equivalent: ¬(Ty >= i) ∨ ¬(Tx >= remaining+1)
+                    if i - 1 < len(Ty) and remaining < len(Tx):
+                        ty_geq_i = Ty[i - 1]           # Ty >= i
+                        tx_geq_rem_plus1 = Tx[remaining]  # Tx >= remaining+1
+                        clause = [-ty_geq_i, -tx_geq_rem_plus1]
                         clauses.append(clause)
         
         print(f"  Generated {len(clauses)} bandwidth clauses for {edges_processed} edges, K={K}")
