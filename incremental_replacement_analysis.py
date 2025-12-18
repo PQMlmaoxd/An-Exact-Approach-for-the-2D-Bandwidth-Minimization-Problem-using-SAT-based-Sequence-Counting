@@ -2,7 +2,7 @@
 """
 Incremental Replacement Analysis: Replace T_d variables one-by-one.
 
-Strategy (theo hướng dẫn của thầy):
+Strategy :
 1. Start with baseline: Full encoding (T_1 .. T_{n-1})
 2. Replace T_{UB+1} with binary constraints → Measure
 3. Replace T_{UB+2} with binary constraints → Measure

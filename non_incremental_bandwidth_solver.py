@@ -297,15 +297,13 @@ class NonIncrementalBandwidthSolver:
         # Create fresh solver
         solver = self._create_solver()
         
-        # Stream position constraints (add and clear immediately)
+        # Stream position constraints (add directly from generator)
         print(f"  Adding position constraints...")
-        position_clauses = self.encode_position_constraints(X_vars, Y_vars, vpool)
-        print(f"    Position: {len(position_clauses)} clauses")
-        
-        for clause in position_clauses:
+        position_clause_count = 0
+        for clause in self.encode_position_constraints(X_vars, Y_vars, vpool):
             solver.add_clause(clause)
-        position_clauses.clear()
-        del position_clauses
+            position_clause_count += 1
+        print(f"    Position: {position_clause_count} clauses")
         
         # Stream distance constraints (add and clear immediately)
         print(f"  Adding distance constraints...")
